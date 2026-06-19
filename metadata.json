@@ -1,0 +1,6 @@
+{
+  "name": "ورشتي",
+  "description": "إدارة ورشة صيانة الهواتف، بيع الأكسسوارات وهندسة الأرباح بدون مخزون معقد.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
