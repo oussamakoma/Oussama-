@@ -9,6 +9,9 @@ interface MaintenanceExpenseDao {
     @Query("SELECT * FROM maintenance_expenses WHERE deviceId = :deviceId")
     fun getExpensesForDevice(deviceId: Int): Flow<List<MaintenanceExpense>>
 
+    @Query("SELECT * FROM maintenance_expenses WHERE deviceId = :deviceId")
+    suspend fun getExpensesForDeviceSync(deviceId: Int): List<MaintenanceExpense>
+
     @Query("SELECT * FROM maintenance_expenses")
     fun getAllExpensesFlow(): Flow<List<MaintenanceExpense>>
 
@@ -20,6 +23,9 @@ interface MaintenanceExpenseDao {
 
     @Delete
     suspend fun deleteExpense(expense: MaintenanceExpense)
+
+    @Query("DELETE FROM maintenance_expenses WHERE deviceId = :deviceId")
+    suspend fun deleteExpensesForDevice(deviceId: Int)
 
     @Query("DELETE FROM maintenance_expenses")
     suspend fun deleteAllExpenses()

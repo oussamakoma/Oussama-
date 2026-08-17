@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.WorkshopTransaction
 import com.example.ui.theme.ProfitGreen
 import com.example.ui.theme.ExpenseRed
+import com.example.ui.theme.LocalIsLiquidTheme
+import androidx.compose.ui.draw.blur
 import com.example.ui.theme.SoftwarePurple
 import com.example.ui.theme.GeneralBlue
 import com.example.ui.theme.AccessoryOrange
@@ -180,13 +182,24 @@ fun TransactionListItem(
                             
                             // Delivery status badge for non-expense/inventory items
                             if (transaction.category != "EXPENSE") {
-                                val badgeColor = if (transaction.isDelivered) ProfitGreen else AccessoryOrange
+                                val isLiquidTheme = LocalIsLiquidTheme.current
+                                val rawBadgeColor = if (transaction.isDelivered || transaction.isPrepaid) ProfitGreen else AccessoryOrange
+                                val badgeColor = if (isLiquidTheme) {
+                                    if (transaction.isDelivered || transaction.isPrepaid) {
+                                        Color(0xFF059669)
+                                    } else {
+                                        if (transaction.category == "DEBT") Color(0xFFC2410C)
+                                        else Color(0xFF1D4ED8)
+                                    }
+                                } else rawBadgeColor
+
                                 val badgeText = if (transaction.isDelivered) {
                                     if (transaction.category == "INVENTORY" || transaction.category == "REFURB") "تم التسليم 💸"
                                     else if (transaction.category == "DEBT") "تم التسديد ✅"
                                     else "تم التسليم"
                                 } else {
-                                    if (transaction.category == "INVENTORY") "في المخزن 📦" 
+                                    if (transaction.isPrepaid) "مدفوع مقدمًا 💰"
+                                    else if (transaction.category == "INVENTORY") "في المخزن 📦" 
                                     else if (transaction.category == "REFURB") "استثمار متاح 📈" 
                                     else if (transaction.category == "DEBT") "قيد السداد ⏳"
                                     else "في الورشة"
@@ -194,8 +207,27 @@ fun TransactionListItem(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(badgeColor.copy(alpha = 0.15f))
-                                        .border(1.dp, badgeColor.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isLiquidTheme) badgeColor.copy(alpha = 0.20f)
+                                            else badgeColor.copy(alpha = 0.15f)
+                                        )
+                                        .then(
+                                            if (isLiquidTheme) {
+                                                Modifier.border(
+                                                    width = 1.dp,
+                                                    brush = Brush.verticalGradient(
+                                                        colors = listOf(
+                                                            Color.White.copy(alpha = 0.65f),
+                                                            Color.White.copy(alpha = 0.40f),
+                                                            Color.White.copy(alpha = 0.18f)
+                                                        )
+                                                    ),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                )
+                                            } else {
+                                                Modifier.border(1.dp, badgeColor.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                                            }
+                                        )
                                         .clickable(enabled = onToggleDelivery != null) { onToggleDelivery?.invoke() }
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
@@ -367,41 +399,101 @@ fun TransactionListItem(
                             horizontalAlignment = Alignment.End,
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
+                            val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+                            val (mainAmountText, mainAmountColor) = remember(transaction, onSurfaceColor) {
+                                when (transaction.category) {
+                                    "EXPENSE" -> {
+                                        val text = "-${formatCurrencyNoSymbol(transaction.costPrice)}"
+                                        val color = ExpenseRed
+                                        Pair(text, color)
+                                    }
+                                    "DEBT" -> {
+                                        val isOwedToMe = transaction.costPrice >= transaction.sellingPrice
+                                        if (transaction.isDelivered) {
+                                            val text = "+0 د.ج"
+                                            val color = onSurfaceColor.copy(alpha = 0.5f)
+                                            Pair(text, color)
+                                        } else {
+                                            if (isOwedToMe) {
+                                                val unpaid = transaction.costPrice - transaction.sellingPrice
+                                                val text = "-${formatCurrencyNoSymbol(unpaid)}"
+                                                val color = ExpenseRed
+                                                Pair(text, color)
+                                            } else {
+                                                val unpaid = transaction.sellingPrice - transaction.costPrice
+                                                val text = "+${formatCurrencyNoSymbol(unpaid)}"
+                                                val color = ProfitGreen
+                                                Pair(text, color)
+                                            }
+                                        }
+                                    }
+                                    else -> {
+                                        if (transaction.isDelivered || transaction.isPrepaid) {
+                                            if (transaction.profit > 0.0) {
+                                                val text = "+${formatCurrencyNoSymbol(transaction.profit)}"
+                                                val color = ProfitGreen
+                                                Pair(text, color)
+                                            } else if (transaction.profit < 0.0) {
+                                                val text = "-${formatCurrencyNoSymbol(-transaction.profit)}"
+                                                val color = ExpenseRed
+                                                Pair(text, color)
+                                            } else {
+                                                val text = "+0 د.ج"
+                                                val color = onSurfaceColor.copy(alpha = 0.5f)
+                                                Pair(text, color)
+                                            }
+                                        } else {
+                                            val text = "-${formatCurrencyNoSymbol(transaction.costPrice)}"
+                                            val color = ExpenseRed
+                                            Pair(text, color)
+                                        }
+                                    }
+                                }
+                            }
                             Text(
-                                text = "+${formatCurrencyNoSymbol(transaction.sellingPrice)}",
+                                text = mainAmountText,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = if (transaction.category == "DEBT" && transaction.isDelivered) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
+                                color = mainAmountColor,
                                 textDecoration = if (transaction.category == "DEBT" && transaction.isDelivered) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
                             )
 
-                            if (transaction.costPrice > 0) {
+                            if (transaction.category != "EXPENSE" && transaction.category != "DEBT" && (transaction.isDelivered || transaction.isPrepaid) && transaction.costPrice > 0) {
                                 Text(
                                     text = "كلفة: -${formatCurrencyNoSymbol(transaction.costPrice)}",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (transaction.category == "DEBT" && transaction.isDelivered) ExpenseRed.copy(alpha = 0.5f) else ExpenseRed,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    textDecoration = if (transaction.category == "DEBT" && transaction.isDelivered) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                                    color = ExpenseRed,
+                                    textDecoration = if (transaction.isDelivered || transaction.isPrepaid) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                                    style = MaterialTheme.typography.labelSmall
                                 )
                             }
 
-                            if (transaction.profit > 0) {
+                            if (transaction.category != "EXPENSE" && transaction.category != "DEBT" && (transaction.isDelivered || transaction.isPrepaid)) {
                                 Text(
-                                    text = if (transaction.category == "DEBT") "باقي: +${formatCurrency(transaction.profit)}" else "ربح: +${formatCurrency(transaction.profit)}",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (transaction.category == "DEBT" && transaction.isDelivered) ProfitGreen.copy(alpha = 0.5f) else ProfitGreen,
-                                    textDecoration = if (transaction.category == "DEBT" && transaction.isDelivered) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                                    text = "البيع: ${formatCurrency(transaction.sellingPrice)}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                 )
-                            } else if (transaction.profit < 0) {
-                                Text(
-                                    text = if (transaction.category == "DEBT") "باقي: ${formatCurrency(transaction.profit)}" else "خسارة: ${formatCurrency(transaction.profit)}",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (transaction.category == "DEBT" && transaction.isDelivered) ExpenseRed.copy(alpha = 0.5f) else ExpenseRed,
-                                    textDecoration = if (transaction.category == "DEBT" && transaction.isDelivered) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
-                                )
+                            } else {
+                                if (transaction.profit > 0) {
+                                    Text(
+                                        text = if (transaction.category == "DEBT") "باقي: +${formatCurrency(transaction.profit)}" else "ربح: +${formatCurrency(transaction.profit)}",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = if (transaction.category == "DEBT" && transaction.isDelivered) ProfitGreen.copy(alpha = 0.5f) else ProfitGreen,
+                                        textDecoration = if (transaction.category == "DEBT" && transaction.isDelivered) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                                    )
+                                } else if (transaction.profit < 0) {
+                                    Text(
+                                        text = if (transaction.category == "DEBT") "باقي: ${formatCurrency(transaction.profit)}" else "خسارة: ${formatCurrency(transaction.profit)}",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = if (transaction.category == "DEBT" && transaction.isDelivered) ExpenseRed.copy(alpha = 0.5f) else ExpenseRed,
+                                        textDecoration = if (transaction.category == "DEBT" && transaction.isDelivered) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                                    )
+                                }
                             }
                         }
                     }

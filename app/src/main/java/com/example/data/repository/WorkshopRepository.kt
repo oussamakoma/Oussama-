@@ -35,6 +35,12 @@ class WorkshopRepository(
     suspend fun insertExpense(expense: MaintenanceExpense): Long = maintenanceExpenseDao.insertExpense(expense)
     suspend fun updateExpense(expense: MaintenanceExpense) = maintenanceExpenseDao.updateExpense(expense)
     suspend fun deleteExpense(expense: MaintenanceExpense) = maintenanceExpenseDao.deleteExpense(expense)
+    suspend fun deleteExpensesForDevice(deviceId: Int) = maintenanceExpenseDao.deleteExpensesForDevice(deviceId)
+    suspend fun getExpensesForDeviceSync(deviceId: Int): List<MaintenanceExpense> = maintenanceExpenseDao.getExpensesForDeviceSync(deviceId)
+
+    suspend fun deleteRefurbTransactionsByDates(dates: List<Long>) = transactionDao.deleteRefurbTransactionsByDates(dates)
+    suspend fun deleteRefurbTransactionsByModel(deviceModel: String) = transactionDao.deleteRefurbTransactionsByModel(deviceModel)
+    suspend fun deleteRefurbTransactionByDate(date: Long) = transactionDao.deleteRefurbTransactionByDate(date)
     // ...
     val allTransactions: Flow<List<WorkshopTransaction>> = transactionDao.getAllTransactions()
     val allDebts: Flow<List<PersonalDebt>> = personalDebtDao.getAllDebts()

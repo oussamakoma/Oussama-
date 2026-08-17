@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -56,7 +57,7 @@ fun BudgetCategoriesScreen(viewModel: WorkshopViewModel) {
     val categories by viewModel.budgetCategories.collectAsStateWithLifecycle()
     var selectedCategory by remember { mutableStateOf<BudgetCategory?>(null) }
     var categoryToEditLimit by remember { mutableStateOf<BudgetCategory?>(null) }
-    var showChartDialog by remember { mutableStateOf(false) }
+    var showChartDialog by rememberSaveable { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -134,7 +135,7 @@ fun BudgetCategoriesScreen(viewModel: WorkshopViewModel) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
-                items(categories) { category ->
+                items(categories, key = { it.name }) { category ->
                     BudgetCategoryItem(
                         category = category,
                         onEditLimit = { categoryToEditLimit = category },
@@ -515,7 +516,7 @@ fun EditBudgetLimitDialog(
     onDismiss: () -> Unit,
     onSave: (Double) -> Unit
 ) {
-    var limitStr by remember { mutableStateOf(category.total.toString()) }
+    var limitStr by rememberSaveable { mutableStateOf(category.total.toString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -572,7 +573,7 @@ fun TransactionListDetailScreen(category: BudgetCategory, viewModel: WorkshopVie
                 Text(text = "تفاصيل ${category.name}", fontWeight = FontWeight.Bold, fontSize = 20.sp)
             }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(transactions) { transaction ->
+                items(transactions, key = { it.id }) { transaction ->
                     TransactionListItem(
                         transaction = transaction,
                         onClick = { transactionToEdit = transaction },
@@ -591,9 +592,9 @@ fun TransactionListDetailScreen(category: BudgetCategory, viewModel: WorkshopVie
                     viewModel.deleteTransaction(transactionToEdit!!)
                     transactionToEdit = null
                 },
-                onSave = { title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance ->
+                onSave = { title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance, isPrepaid ->
                     viewModel.deleteTransaction(transactionToEdit!!)
-                    viewModel.addTransaction(title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance)
+                    viewModel.addTransaction(title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance, isPrepaid)
                     transactionToEdit = null
                 }
             )
@@ -612,6 +613,7 @@ fun getIconForCategory(name: String): ImageVector {
         "صحة وعلاج" -> Icons.Default.MedicalServices
         "إيجار" -> Icons.Default.Apartment
         "تسوق" -> Icons.Default.ShoppingBag
+        "أخرى" -> Icons.Default.Inventory
         else -> Icons.Default.ShoppingCart
     }
 }

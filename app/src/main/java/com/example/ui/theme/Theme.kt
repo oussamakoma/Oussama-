@@ -111,30 +111,34 @@ private val SlateDark = darkColorScheme(
 
 // =================== LIQUID GLASS COLOR PALETTE ===================
 private val LiquidGlassLight = lightColorScheme(
-    primary = Color(0xFF007AFF), // iOS Vivid Blue
-    secondary = Color(0xFF5856D6), // iOS Purple
-    tertiary = Color(0xFFFF2D55), // iOS Pink
-    background = Color(0x15F2F2F7), // Highly transparent base
-    surface = Color(0x33FFFFFF), // Elegant translucent Apple-style light frosted glass
-    surfaceVariant = Color(0x22FFFFFF), // Very thin glass accent surface
+    primary = NeutralBlue,
+    secondary = AccentService,
+    tertiary = AccentAccessory,
+    background = Color.Transparent,
+    surface = GlassBg,
+    surfaceVariant = GlassBgThin,
     onPrimary = Color.White,
     onSecondary = Color.White,
-    onBackground = Color(0xFF1C1C1E),
-    onSurface = Color(0xFF1C1C1E),
-    outlineVariant = Color(0x55FFFFFF) // Distinct fine light specular grid edge
+    onBackground = TextPrimary,
+    onSurface = TextPrimary,
+    onSurfaceVariant = TextSecondary,
+    outline = GlassBorder,
+    outlineVariant = GlassBorderBot
 )
 private val LiquidGlassDark = darkColorScheme(
-    primary = Color(0xFF0A84FF), // iOS Vivid Blue
-    secondary = Color(0xFF5E5CE6), // iOS Purple
-    tertiary = Color(0xFFFF375F), // iOS Pink
-    background = Color(0x10000000), // Highly transparent dark base
-    surface = Color(0x3012121A), // Pure translucent premium dark obsidian glass
-    surfaceVariant = Color(0x2012121A), // Subtle dark glass highlighting
+    primary = NeutralBlue,
+    secondary = AccentService,
+    tertiary = AccentAccessory,
+    background = Color.Transparent,
+    surface = GlassBg,
+    surfaceVariant = GlassBgThin,
     onPrimary = Color.White,
     onSecondary = Color.White,
-    onBackground = Color(0xFFF2F2F7),
-    onSurface = Color(0xFFF2F2F7),
-    outlineVariant = Color(0x33FFFFFF) // Discrete fine glowing dark specular boundary
+    onBackground = Color(0xECEFF1F3),  // Beautiful 92% white/light grey for legibility
+    onSurface = Color.White,           // Crisp white for main surface cards text
+    onSurfaceVariant = Color(0xB3FFFFFF), // Elegant 70% white for captions/details
+    outline = GlassBorder,
+    outlineVariant = GlassBorderBot
 )
 
 val LocalIsLiquidTheme = staticCompositionLocalOf { false }

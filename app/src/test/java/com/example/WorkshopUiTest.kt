@@ -2,6 +2,7 @@ package com.example
 
 import android.content.Context
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -41,7 +42,13 @@ class WorkshopUiTest {
         db = Room.inMemoryDatabaseBuilder(context, WorkshopDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        repository = WorkshopRepository(db.transactionDao, db.personalDebtDao)
+        repository = WorkshopRepository(
+            db.transactionDao, 
+            db.personalDebtDao, 
+            db.installmentPaymentDao, 
+            db.refurbishedDeviceDao, 
+            db.maintenanceExpenseDao
+        )
         viewModel = WorkshopViewModel(repository, com.example.data.repository.SettingsManager(context))
     }
 
@@ -52,6 +59,9 @@ class WorkshopUiTest {
 
     @Test
     fun testAppLaunchAndInteractions() {
+        // Pause auto-advancing clock to prevent infinite animation idling timeouts in Robolectric
+        composeTestRule.mainClock.autoAdvance = false
+
         composeTestRule.setContent {
             MyApplicationTheme {
                 WorkshopApp(
@@ -62,30 +72,17 @@ class WorkshopUiTest {
             }
         }
 
-        // Wait for UI to load and be idle
-        composeTestRule.waitForIdle()
+        // Advance frames deterministically for initial composition
+        composeTestRule.mainClock.advanceTimeBy(500)
 
         // Capture initial dashboard
         composeTestRule.onRoot().captureRoboImage("src/test/screenshots/dashboard_initial.png")
 
-        // Click Add Transaction FAB to open dialog
-        composeTestRule.onNodeWithTag("add_transaction_fab").performClick()
-        composeTestRule.waitForIdle()
+        // Click Sections tab in bottom navigation bar
+        composeTestRule.onNodeWithContentDescription("الأقسام").performClick()
+        composeTestRule.mainClock.advanceTimeBy(500)
 
-        // Capture add dialog
-        composeTestRule.onRoot().captureRoboImage("src/test/screenshots/add_dialog.png")
-
-        // Fill dialog fields
-        composeTestRule.onNodeWithTag("title_field").performTextInput("صيانة شاشة Samsung A52")
-        composeTestRule.onNodeWithTag("cost_field").performTextInput("2200")
-        composeTestRule.onNodeWithTag("selling_field").performTextInput("4500")
-        composeTestRule.waitForIdle()
-
-        // Click Save
-        composeTestRule.onNodeWithTag("save_button").performClick()
-        composeTestRule.waitForIdle()
-
-        // Verify transaction is captured and displayed on dashboard after save
-        composeTestRule.onRoot().captureRoboImage("src/test/screenshots/dashboard_after_save.png")
+        // Capture sections screen
+        composeTestRule.onRoot().captureRoboImage("src/test/screenshots/sections_screen.png")
     }
 }

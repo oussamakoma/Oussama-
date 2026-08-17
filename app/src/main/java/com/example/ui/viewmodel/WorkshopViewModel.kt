@@ -159,7 +159,9 @@ class WorkshopViewModel(
             )
         }
         (baseTransactions + debtTransactions).sortedByDescending { it.date }
-    }.stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
 
     // Filtered transaction list
     val filteredTransactions: StateFlow<List<WorkshopTransaction>> = combine(
@@ -197,6 +199,7 @@ class WorkshopViewModel(
             matchesSearch && matchesCategory && matchesDate && matchesDelivery
         }
     }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -204,49 +207,119 @@ class WorkshopViewModel(
     )
 
     // Statistics Flow updated to differentiate parts cost and general expenses
-    private val _totalInitialBalanceFlow: Flow<Double> = combine(
-        combine(walletPocketInit, walletBankInit, walletGoodsInit, walletPersonalInit) { p, b, g, pe -> listOf(p, b, g, pe) },
-        combine(walletPocketInclude, walletBankInclude, walletGoodsInclude, walletPersonalInclude) { pInc, bInc, gInc, peInc -> listOf(pInc, bInc, gInc, peInc) }
-    ) { inits, includes ->
-        (if (includes[0]) inits[0] else 0.0) + (if (includes[1]) inits[1] else 0.0) + (if (includes[2]) inits[2] else 0.0) + (if (includes[3]) inits[3] else 0.0)
+    private val _totalInitialBalanceFlow: StateFlow<Double> = combine(
+        listOf<Flow<Any>>(
+            walletPocketInit, walletBankInit, walletGoodsInit, walletPersonalInit,
+            walletPocketInclude, walletBankInclude, walletGoodsInclude, walletPersonalInclude
+        )
+    ) { array ->
+        val p = array[0] as Double
+        val b = array[1] as Double
+        val g = array[2] as Double
+        val pe = array[3] as Double
+        val pInc = array[4] as Boolean
+        val bInc = array[5] as Boolean
+        val gInc = array[6] as Boolean
+        val peInc = array[7] as Boolean
+        (if (pInc) p else 0.0) + (if (bInc) b else 0.0) + (if (gInc) g else 0.0) + (if (peInc) pe else 0.0)
     }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = 0.0
+    )
 
     val statsFlow: StateFlow<WorkshopStats> = combine(
         transactionsFlow,
         _selectedCategory,
         _dateFilter,
-        _totalInitialBalanceFlow
-    ) { transactions, cat, dateFltr, totalInitialBalance ->
+        _totalInitialBalanceFlow,
+        combine(walletPersonalName, debtsFlow, installmentsFlow) { name, debts, inst ->
+            Triple(name, debts, inst)
+        }
+    ) { transactions, cat, dateFltr, totalInitialBalance, debtsAndName ->
+        val (personalNameVal, debts, installments) = debtsAndName
         val filteredForStats = transactions.filter { transaction ->
-            val matchesCategory = cat == "ALL" || transaction.category == cat
             val matchesDate = when (dateFltr) {
                 DateFilter.ALL -> true
                 DateFilter.TODAY -> isToday(transaction.date)
                 DateFilter.WEEK -> isThisWeek(transaction.date)
                 DateFilter.MONTH -> isThisMonth(transaction.date)
             }
-            matchesCategory && matchesDate
+            matchesDate
         }
 
-        val partsCost = filteredForStats.filter { it.category != "EXPENSE" && it.category != "DEBT" && !it.isDelivered }.sumOf { it.costPrice }
-        val expensesCost = filteredForStats.filter { it.category == "EXPENSE" }.sumOf { it.costPrice } + filteredForStats.filter { it.category == "DEBT" && it.profit < 0 }.sumOf { -it.profit }
+        val partsCost = filteredForStats.filter { 
+            it.category != "EXPENSE" && 
+            it.category != "DEBT" &&
+            (it.isDelivered || it.isPrepaid) && 
+            !(it.category == "REFURB" && it.title.startsWith("بيع"))
+        }.sumOf { it.costPrice }
+
+        val personalExpenses = filteredForStats.filter { 
+            it.category == "EXPENSE" && 
+            (it.wallet == personalNameVal || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي")
+        }.sumOf { it.costPrice }
+
+        val shopExpenses = filteredForStats.filter { 
+            it.category == "EXPENSE" && 
+            !(it.wallet == personalNameVal || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي")
+        }.sumOf { it.costPrice } + 
+        filteredForStats.filter { it.category == "DEBT" && it.profit < 0 }.sumOf { -it.profit }
+
+        val expensesCost = personalExpenses + shopExpenses
         
-        val initialBalanceToAdd = if (dateFltr == DateFilter.ALL) totalInitialBalance else 0.0
-        val totalRevenue = filteredForStats.filter { it.isDelivered && it.category != "DEBT" }.sumOf { it.sellingPrice } + filteredForStats.filter { it.category == "DEBT" && it.profit > 0 }.sumOf { it.profit } + initialBalanceToAdd
+        val totalRevenue = filteredForStats.filter { (it.isDelivered || it.isPrepaid) && it.category != "DEBT" }.sumOf { it.sellingPrice } + filteredForStats.filter { it.category == "DEBT" && it.profit > 0 }.sumOf { it.profit }
         
-        // Net Profit = Sum of individual transaction profits
-        val totalProfit = filteredForStats.sumOf { it.profit } + initialBalanceToAdd
+        val workshopNetProfit = totalRevenue - partsCost - shopExpenses
+
+        // Net Profit = Sum of individual transaction profits matching pocket balance changes exactly
+        val totalProfit = filteredForStats.sumOf { 
+            if (it.category == "REFURB" && it.title.startsWith("بيع")) it.sellingPrice else it.profit
+        }
         val count = filteredForStats.size
+
+        val workshopDebts = filteredForStats.sumOf { it.creditRemaining }
+
+        val personalDebtsOwedToMe = debts.filter { 
+            it.isOwedToMe && !it.isPaid && (dateFltr == DateFilter.ALL || when (dateFltr) {
+                DateFilter.TODAY -> isToday(it.date)
+                DateFilter.WEEK -> isThisWeek(it.date)
+                DateFilter.MONTH -> isThisMonth(it.date)
+                else -> true
+            })
+        }.sumOf { debt -> 
+            debt.amount - installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid } 
+        }
+
+        val personalDebtsOwedByMe = debts.filter { 
+            !it.isOwedToMe && !it.isPaid && (dateFltr == DateFilter.ALL || when (dateFltr) {
+                DateFilter.TODAY -> isToday(it.date)
+                DateFilter.WEEK -> isThisWeek(it.date)
+                DateFilter.MONTH -> isThisMonth(it.date)
+                else -> true
+            })
+        }.sumOf { debt -> 
+            debt.amount - installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid } 
+        }
 
         WorkshopStats(
             totalCost = partsCost + expensesCost,
             partsCost = partsCost,
             expensesCost = expensesCost,
+            personalExpenses = personalExpenses,
+            shopExpenses = shopExpenses,
+            workshopNetProfit = workshopNetProfit,
             totalRevenue = totalRevenue,
             totalProfit = totalProfit,
-            transactionCount = count
+            transactionCount = count,
+            workshopDebts = workshopDebts,
+            personalDebtsOwedToMe = personalDebtsOwedToMe,
+            personalDebtsOwedByMe = personalDebtsOwedByMe
         )
     }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -328,7 +401,8 @@ class WorkshopViewModel(
         "تسوق" to 5000.0,
         "العناية الشخصية" to 3000.0,
         "كوسميتيك" to 2000.0,
-        "حلاقة" to 1500.0
+        "حلاقة" to 1500.0,
+        "أخرى" to 5000.0
     )
 
     fun updateBudgetLimit(category: String, limit: Double) {
@@ -372,7 +446,14 @@ class WorkshopViewModel(
                 "كوسميتيك" to "كوسميتيك",
                 "حلاقة" to "حلاقة",
                 "حلاق" to "حلاقة",
-                "تجميل" to "كوسميتيك"
+                "تجميل" to "كوسميتيك",
+                "خرى" to "أخرى",
+                "أخرى" to "أخرى",
+                "الخرى" to "أخرى",
+                "الأخرى" to "أخرى",
+                "علبة" to "أخرى",
+                "كرتون" to "أخرى",
+                "كرطون" to "أخرى"
             )
             
             // Normalize title for more robust matching
@@ -487,7 +568,8 @@ class WorkshopViewModel(
         dueDate: Long? = null,
         date: Long = System.currentTimeMillis(),
         isDelivered: Boolean = true,
-        affectBalance: Boolean = true
+        affectBalance: Boolean = true,
+        isPrepaid: Boolean = false
     ) {
         viewModelScope.launch {
             val transaction = WorkshopTransaction(
@@ -504,7 +586,8 @@ class WorkshopViewModel(
                 date = date,
                 dueDate = dueDate,
                 isDelivered = isDelivered,
-                affectBalance = affectBalance
+                affectBalance = affectBalance,
+                isPrepaid = isPrepaid
             )
             val insertedId = repository.insert(transaction)
             if (creditAmount > 0.0) {
@@ -591,7 +674,7 @@ class WorkshopViewModel(
                 notes = "شراء هاتف للاستثمار تدوير. رقم تسلسلي: ${serialNumber.ifBlank { "غير مسجل" }}",
                 creditAmount = 0.0,
                 creditPaid = 0.0,
-                wallet = "الصندوق (Pocket)",
+                wallet = walletPocketName.value,
                 date = createdAt
             )
         }
@@ -605,6 +688,29 @@ class WorkshopViewModel(
 
     fun deleteDevice(device: RefurbishedDevice) {
         viewModelScope.launch {
+            // 1. Get all maintenance expenses for this device first
+            val expensesList = repository.getExpensesForDeviceSync(device.id)
+            
+            // 2. Gather all dates to delete from transactions
+            val datesToDelete = mutableListOf<Long>()
+            datesToDelete.add(device.createdAt)
+            device.saleDate?.let { datesToDelete.add(it) }
+            expensesList.forEach { datesToDelete.add(it.date) }
+            
+            val uniqueDates = datesToDelete.distinct()
+            
+            // 3. Delete the corresponding transactions by model name first (bulletproof)
+            repository.deleteRefurbTransactionsByModel(device.deviceName)
+            
+            // 3b. Also delete by dates as a fallback
+            if (uniqueDates.isNotEmpty()) {
+                repository.deleteRefurbTransactionsByDates(uniqueDates)
+            }
+            
+            // 4. Delete maintenance expenses from local db
+            repository.deleteExpensesForDevice(device.id)
+            
+            // 5. Delete the device itself
             repository.deleteDevice(device)
         }
     }
@@ -624,7 +730,7 @@ class WorkshopViewModel(
                 notes = "تكلفة قطعة غيار/تجهيز للهاتف المستثمر",
                 creditAmount = 0.0,
                 creditPaid = 0.0,
-                wallet = "الصندوق (Pocket)",
+                wallet = walletPocketName.value,
                 date = date
             )
         }
@@ -633,6 +739,7 @@ class WorkshopViewModel(
     fun deleteExpense(expense: MaintenanceExpense) {
         viewModelScope.launch {
             repository.deleteExpense(expense)
+            repository.deleteRefurbTransactionByDate(expense.date)
         }
     }
 
@@ -678,14 +785,14 @@ class WorkshopViewModel(
                 addTransaction(
                     title = "بيع هاتف استثمار: ${it.deviceName}",
                     category = "REFURB",
-                    costPrice = 0.0, // Set to 0.0 to prevent double counting as purchase and reparation costs are logged separately!
+                    costPrice = costPrice, // Pass the total furbishing of the device as costPrice (shows up as strikethrough 'Tach'tib')
                     sellingPrice = salePrice,
                     deviceModel = it.deviceName,
                     customerName = customerName ?: "",
                     notes = transNotes,
                     creditAmount = creditAmount,
                     creditPaid = 0.0,
-                    wallet = "الصندوق (Pocket)",
+                    wallet = walletPocketName.value,
                     date = saleDate
                 )
 
@@ -706,6 +813,10 @@ class WorkshopViewModel(
         viewModelScope.launch {
             val device = repository.getDeviceById(deviceId)
             device?.let {
+                // Delete sale transaction
+                it.saleDate?.let { sDate ->
+                    repository.deleteRefurbTransactionByDate(sDate)
+                }
                 repository.updateDevice(it.copy(
                     salePrice = null,
                     isCreditSale = false,
@@ -803,14 +914,23 @@ class WorkshopViewModel(
                 cal1.get(Calendar.WEEK_OF_YEAR) == cal2.get(Calendar.WEEK_OF_YEAR)
     }
 
-    fun importBackup(transactions: List<WorkshopTransaction>, debts: List<PersonalDebt>) {
+    fun importBackup(backupData: com.example.data.repository.AppBackupData) {
         viewModelScope.launch {
-            // Bulk insert incoming objects safely (without replacing with old clashing IDs)
-            transactions.forEach {
-                repository.insert(it.copy(id = 0))
+            // Bulk insert incoming objects preserving original IDs from backup
+            backupData.transactions.forEach {
+                repository.insert(it)
             }
-            debts.forEach {
-                repository.insertDebt(it.copy(id = 0))
+            backupData.debts.forEach {
+                repository.insertDebt(it)
+            }
+            backupData.devices.forEach {
+                repository.insertDevice(it)
+            }
+            backupData.expenses.forEach {
+                repository.insertExpense(it)
+            }
+            backupData.installments.forEach {
+                repository.insertInstallment(it)
             }
         }
     }
@@ -835,9 +955,15 @@ data class WorkshopStats(
     val totalCost: Double = 0.0,
     val partsCost: Double = 0.0,
     val expensesCost: Double = 0.0,
+    val personalExpenses: Double = 0.0,
+    val shopExpenses: Double = 0.0,
+    val workshopNetProfit: Double = 0.0,
     val totalRevenue: Double = 0.0,
     val totalProfit: Double = 0.0,
-    val transactionCount: Int = 0
+    val transactionCount: Int = 0,
+    val workshopDebts: Double = 0.0,
+    val personalDebtsOwedToMe: Double = 0.0,
+    val personalDebtsOwedByMe: Double = 0.0
 )
 
 class WorkshopViewModelFactory(

@@ -13,7 +13,7 @@ class WorkshopApplication : Application() {
             WorkshopDatabase::class.java,
             "workshop_database"
         )
-        .addMigrations(com.example.data.local.MIGRATION_10_11)
+        .addMigrations(com.example.data.local.MIGRATION_10_11, com.example.data.local.MIGRATION_11_12)
         .fallbackToDestructiveMigration() // Simple migration support
         .build()
     }

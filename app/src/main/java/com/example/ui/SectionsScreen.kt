@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,14 +79,14 @@ fun SectionsScreen(
     val coroutineScope = rememberCoroutineScope()
 
     val categories = listOf(
-        CategorySectionInfo("SCREEN", "تصليح الشاشات 📱", "Réparation d'Écrans", "Screen Repairs", Icons.Default.Smartphone, Color(0xFF00B8D4)),
-        CategorySectionInfo("PARTS", "قطع الغيار ⚙️", "Pièces de Rechange", "Spare Parts", Icons.Default.MiscellaneousServices, Color(0xFF2962FF)),
-        CategorySectionInfo("ACCESSORY", "الأكسسوارات 🎧", "Vente d'Accessoires", "Accessories & Sales", Icons.Default.Headphones, Color(0xFFFF6D00)),
-        CategorySectionInfo("SERVICE", "البرمجة والسوفتر 💻", "Direct Flash & Soft", "Software & Flashing", Icons.Default.DeveloperMode, Color(0xFFAA00FF)),
-        CategorySectionInfo("EXPENSE", "مصروف 💸", "Dépenses / Charges", "Expenses & Costs", Icons.Default.ReceiptLong, Color(0xFFD50000)),
-        CategorySectionInfo("REFURB", "استثمار وتدوير ♻️", "Investissement & Recyclage", "Refurbished Devices", Icons.Default.Autorenew, Color(0xFF00E676)),
-        CategorySectionInfo("INVENTORY", "مخزون المحل 📦", "Stock du Magasin", "Shop Inventory", Icons.Default.Inventory, Color(0xFF8D6E63)),
-        CategorySectionInfo("OTHER", "صيانات عامة 🛠️", "Matériels & Divers", "Other Hardware", Icons.Default.HomeRepairService, Color(0xFF455A64))
+        CategorySectionInfo("SCREEN", "تصليح الشاشات 📱", "Réparation d'Écrans", "Screen Repairs", Icons.Default.Smartphone, Color(0xFF60A5FA)),
+        CategorySectionInfo("PARTS", "قطع الغيار ⚙️", "Pièces de Rechange", "Spare Parts", Icons.Default.MiscellaneousServices, Color(0xFFFB923C)),
+        CategorySectionInfo("ACCESSORY", "الأكسسوارات 🎧", "Vente d'Accessoires", "Accessories & Sales", Icons.Default.Headphones, Color(0xFFF472B6)),
+        CategorySectionInfo("SERVICE", "البرمجة والسوفتر 💻", "Direct Flash & Soft", "Software & Flashing", Icons.Default.DeveloperMode, Color(0xFFA78BFA)),
+        CategorySectionInfo("EXPENSE", "مصروف 💸", "Dépenses / Charges", "Expenses & Costs", Icons.Default.ReceiptLong, Color(0xFFF87171)),
+        CategorySectionInfo("REFURB", "استثمار وتدوير ♻️", "Investissement & Recyclage", "Refurbished Devices", Icons.Default.Autorenew, Color(0xFF34D399)),
+        CategorySectionInfo("INVENTORY", "مخزون المحل 📦", "Stock du Magasin", "Shop Inventory", Icons.Default.Inventory, Color(0xFFD97706)),
+        CategorySectionInfo("OTHER", "صيانات عامة 🛠️", "Matériels & Divers", "Other Hardware", Icons.Default.HomeRepairService, Color(0xFF6366F1))
     )
 
     // Calculate sum of revenue across all categories for percentage weights
@@ -95,7 +96,7 @@ fun SectionsScreen(
     val totalProfitAll = totalRevenueAll - totalCostAll
     val totalCreditAll = transactions.sumOf { it.creditAmount - it.creditPaid }
 
-    val goodsChange = transactions.filter { it.category == "ACCESSORY" && it.affectBalance }.sumOf { it.profit }
+    val goodsChange = transactions.filter { it.category == "ACCESSORY" && it.affectBalance }.sumOf { it.cashFlow }
     val goodsBalance = goodsInit + goodsChange
 
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -327,7 +328,7 @@ fun SectionsScreen(
                     count = catTransactions.size
                     sumCost = catTransactions.sumOf { it.costPrice }
                     sumRevenue = catTransactions.sumOf { it.sellingPrice }
-                    sumProfit = catTransactions.sumOf { it.profit }
+                    sumProfit = catTransactions.sumOf { it.cashFlow }
                 }
                 
                 Box(
@@ -337,12 +338,11 @@ fun SectionsScreen(
                         .clip(RoundedCornerShape(24.dp))
                         .background(
                             brush = if (isLiquidTheme) {
-                                Brush.linearGradient(
-                                    colors = if (isDarkTheme) {
-                                        listOf(Color(0x351E1E2E), Color(0x101E1E2E))
-                                    } else {
-                                        listOf(Color(0x80FFFFFF), Color(0x20FFFFFF))
-                                    }
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.20f),
+                                        Color.White.copy(alpha = 0.20f)
+                                    )
                                 )
                             } else {
                                 Brush.linearGradient(
@@ -350,23 +350,26 @@ fun SectionsScreen(
                                 )
                             }
                         )
-                        .drawBehind {
-                            drawRoundRect(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(cat.color.copy(alpha = if (isDarkTheme) 0.5f else 0.3f), Color.Transparent),
-                                    center = androidx.compose.ui.geometry.Offset(size.width * 0.85f, size.height * 0.25f),
-                                    radius = size.width * 0.7f
-                                )
-                            )
-                        }
+                        .then(
+                            if (isLiquidTheme) Modifier else {
+                                Modifier.drawBehind {
+                                    drawRoundRect(
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(cat.color.copy(alpha = if (isDarkTheme) 0.5f else 0.3f), Color.Transparent),
+                                            center = androidx.compose.ui.geometry.Offset(size.width * 0.85f, size.height * 0.25f),
+                                            radius = size.width * 0.7f
+                                        )
+                                    )
+                                }
+                            }
+                        )
                         .border(
                             width = if (isLiquidTheme) 1.2.dp else 2.dp,
                             brush = if (isLiquidTheme) {
-                                Brush.linearGradient(
+                                Brush.verticalGradient(
                                     colors = listOf(
-                                        Color.White.copy(alpha = if (isDarkTheme) 0.22f else 0.65f),
-                                        cat.color.copy(alpha = 0.40f),
-                                        Color.White.copy(alpha = if (isDarkTheme) 0.05f else 0.15f)
+                                        Color.White.copy(alpha = 0.76f),
+                                        Color.White.copy(alpha = 0.15f)
                                     )
                                 )
                             } else {
@@ -427,7 +430,24 @@ fun SectionsScreen(
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.05f)),
+                                    .background(
+                                        if (isLiquidTheme) cat.color.copy(alpha = 0.22f)
+                                        else (if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.05f))
+                                    )
+                                    .then(
+                                        if (isLiquidTheme) {
+                                            Modifier.border(
+                                                width = 1.dp,
+                                                brush = Brush.verticalGradient(
+                                                    colors = listOf(
+                                                        Color.White.copy(alpha = 0.70f),
+                                                        Color.White.copy(alpha = 0.20f)
+                                                    )
+                                                ),
+                                                shape = RoundedCornerShape(14.dp)
+                                            )
+                                        } else Modifier
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -495,7 +515,7 @@ fun SectionsScreen(
                                     val soldToday = inventoryToday.sumOf { it.sellingPrice }
                                     soldToday - spentToday
                                 } else {
-                                    catTransactions.filter { isToday(it.date) }.sumOf { it.profit }
+                                    catTransactions.filter { isToday(it.date) }.sumOf { it.cashFlow }
                                 }
                             }
 
@@ -516,14 +536,19 @@ fun SectionsScreen(
                             }
 
                             // 1. Accumulative Total (displaySum) displayed LARGE
-                            val totalColor = if (representsExpense) {
+                            val totalColor = if (isLiquidTheme) {
+                                cat.color
+                            } else if (representsExpense) {
                                 textColor
                             } else {
                                 if (displaySum < 0) Color(0xFFEF4444) else if (displaySum > 0) Color(0xFF34D399) else textColor
                             }
 
                             Text(
-                                text = formatKDCurrency(displaySum),
+                                text = androidx.compose.ui.text.buildAnnotatedString {
+                                    val prefix = if (!representsExpense && displaySum > 0) "+" else ""
+                                    append(prefix + formatKDCurrency(displaySum))
+                                },
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = totalColor,
@@ -821,7 +846,7 @@ fun SectionsScreen(
                                         .fillMaxWidth()
                                         .heightIn(max = 350.dp) // responsive containment
                                 ) {
-                                    items(catTransactions.reversed()) { trx ->
+                                    items(catTransactions.reversed(), key = { it.id }) { trx ->
                                         val personalName = viewModel.walletPersonalName.value
                                         val isExpense = trx.category == "EXPENSE" || trx.wallet == "مصروف شخصي" || trx.wallet == "مصروفي شخصي" || trx.wallet == "مصروفي الشخصي" || trx.wallet == personalName
                                         val itemColor = if (isExpense) {
@@ -955,20 +980,71 @@ fun SectionsScreen(
                                                     }
 
                                                     Column(horizontalAlignment = Alignment.End) {
-                                                        val displayPrice = if (isExpense) -trx.costPrice else trx.sellingPrice
+                                                        val (primaryAmount, primaryColor, prefix) = when (trx.category) {
+                                                            "EXPENSE" -> {
+                                                                Triple(trx.costPrice, Color(0xFFEF4444), "-")
+                                                            }
+                                                            "DEBT" -> {
+                                                                val isOwedToMe = trx.costPrice >= trx.sellingPrice
+                                                                if (trx.isDelivered) {
+                                                                    Triple(0.0, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), "+")
+                                                                } else {
+                                                                    if (isOwedToMe) {
+                                                                        val unpaid = trx.costPrice - trx.sellingPrice
+                                                                        Triple(unpaid, Color(0xFFEF4444), "-")
+                                                                    } else {
+                                                                        val unpaid = trx.sellingPrice - trx.costPrice
+                                                                        Triple(unpaid, Color(0xFF10B981), "+")
+                                                                    }
+                                                                }
+                                                            }
+                                                            else -> {
+                                                                if (trx.isDelivered || trx.isPrepaid) {
+                                                                    Triple(trx.profit, Color(0xFF10B981), "+")
+                                                                } else {
+                                                                    Triple(trx.costPrice, Color(0xFFEF4444), "-")
+                                                                }
+                                                            }
+                                                        }
                                                         Text(
-                                                            text = (if (displayPrice > 0 && !isExpense) "+" else "") + formatWithLoc(displayPrice, lang),
+                                                            text = prefix + formatWithLoc(primaryAmount, lang),
                                                             fontSize = 13.sp,
                                                             fontWeight = FontWeight.ExtraBold,
-                                                            color = if (isExpense || displayPrice < 0) Color(0xFFE53935) else cat.color
+                                                            color = primaryColor
                                                         )
                                                         
                                                         if (!isExpense && trx.costPrice > 0) {
                                                             Text(
-                                                                text = "-" + formatWithLoc(trx.costPrice, lang),
+                                                                text = "الشراء: -${formatWithLoc(trx.costPrice, lang)}",
+                                                                textDecoration = if (trx.isDelivered || trx.isPrepaid) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
                                                                 fontSize = 10.sp,
-                                                                color = Color(0xFFE53935).copy(alpha = 0.5f),
-                                                                fontWeight = FontWeight.Medium
+                                                                color = Color(0xFFEF4444),
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+
+                                                        val isStockTransfer = trx.category == "INVENTORY" || (trx.category == "REFURB" && !trx.isDelivered)
+                                                        if (trx.category != "EXPENSE" && trx.category != "DEBT" && (trx.isDelivered || trx.isPrepaid)) {
+                                                            Text(
+                                                                text = "${if (lang == "ar") "البيع" else "Vente"}: ${formatWithLoc(trx.sellingPrice, lang)}",
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                                            )
+                                                        } else if (!isExpense && !isStockTransfer) {
+                                                            val netProfit = trx.profit
+                                                            val profitLbl = if (trx.category == "DEBT") {
+                                                                if (lang == "ar") "الباقي" else "Solde"
+                                                            } else {
+                                                                if (netProfit >= 0) (if (lang == "ar") "الربح" else "Profit") else (if (lang == "ar") "الخسارة" else "Perte")
+                                                            }
+                                                            val profitColor = if (netProfit >= 0) Color(0xFF10B981) else Color(0xFFEF4444)
+                                                            val profitPrefix = if (netProfit >= 0) "+" else ""
+                                                            Text(
+                                                                text = "$profitLbl: $profitPrefix${formatWithLoc(netProfit, lang)}",
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                color = profitColor
                                                             )
                                                         }
 
@@ -1055,15 +1131,30 @@ fun GlobalStatsDialog(
                         lang = lang
                     )
                     StatsMetricRow(
-                        label = if (lang == "ar") "المصاريف الأخرى" else "Autres Dépenses",
-                        amount = stats.expensesCost,
-                        color = Color(0xFFE53935),
+                        label = if (lang == "ar") "مصاريف المحل والتشغيل" else "Dépenses Atelier",
+                        amount = stats.shopExpenses,
+                        color = Color(0xFFFF9800),
                         icon = Icons.Default.Payments,
+                        lang = lang
+                    )
+                    StatsMetricRow(
+                        label = if (lang == "ar") "صافي ربح الورشة" else "Bénéfice Atelier",
+                        amount = stats.workshopNetProfit,
+                        color = Color(0xFF2E7D32),
+                        icon = Icons.Default.TrendingUp,
+                        isBold = true,
+                        lang = lang
+                    )
+                    StatsMetricRow(
+                        label = if (lang == "ar") "المصاريف الشخصية" else "Dépenses Personnelles",
+                        amount = stats.personalExpenses,
+                        color = Color(0xFFEC407A),
+                        icon = Icons.Default.Person,
                         lang = lang
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     StatsMetricRow(
-                        label = if (lang == "ar") "الربح الصافي" else "Bénéfice Net",
+                        label = if (lang == "ar") "الربح المتبقي للادخار" else "Bénéfice Restant",
                         amount = stats.totalProfit,
                         color = MaterialTheme.colorScheme.primary,
                         icon = Icons.Default.AccountBalanceWallet,
@@ -1085,7 +1176,12 @@ fun GlobalStatsDialog(
                     partsCost = stats.partsCost,
                     expenses = stats.expensesCost,
                     profit = stats.totalProfit,
-                    lang = lang
+                    lang = lang,
+                    personalExpenses = stats.personalExpenses,
+                    shopExpenses = stats.shopExpenses,
+                    workshopDebts = stats.workshopDebts,
+                    personalDebtsOwedToMe = stats.personalDebtsOwedToMe,
+                    personalDebtsOwedByMe = stats.personalDebtsOwedByMe
                 )
                 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -1145,17 +1241,51 @@ fun FinancialBarChart(
     partsCost: Double,
     expenses: Double,
     profit: Double,
-    lang: String
+    lang: String,
+    personalExpenses: Double? = null,
+    shopExpenses: Double? = null,
+    workshopDebts: Double = 0.0,
+    personalDebtsOwedToMe: Double = 0.0,
+    personalDebtsOwedByMe: Double = 0.0
 ) {
-    val totalCosts = partsCost + expenses
-    val maxVal = maxOf(revenue, totalCosts, profit).coerceAtLeast(1.0)
+    val maxVal = maxOf(
+        revenue, 
+        partsCost, 
+        expenses, 
+        profit, 
+        workshopDebts, 
+        personalDebtsOwedToMe, 
+        personalDebtsOwedByMe
+    ).coerceAtLeast(1.0)
     
-    val items = listOf(
-        ChartItem(if (lang == "ar") "المداخيل" else "Revenus", revenue, Color(0xFF4CAF50)),
-        ChartItem(if (lang == "ar") "القطع" else "Pièces", partsCost, Color(0xFF0288D1)),
-        ChartItem(if (lang == "ar") "المصاريف" else "Dépenses", expenses, Color(0xFFE53935)),
-        ChartItem(if (lang == "ar") "الربح" else "Profit", profit, MaterialTheme.colorScheme.primary)
-    )
+    val items = mutableListOf<ChartItem>()
+    items.add(ChartItem(if (lang == "ar") "المداخيل" else "Revenus", revenue, Color(0xFF4CAF50)))
+    items.add(ChartItem(if (lang == "ar") "قطع الغيار" else "Pièces", partsCost, Color(0xFF0288D1)))
+    
+    if (workshopDebts > 0.0) {
+        items.add(ChartItem(if (lang == "ar") "ديون الورشة" else "Dettes Atelier", workshopDebts, Color(0xFFE53935)))
+    }
+    if (personalDebtsOwedToMe > 0.0) {
+        items.add(ChartItem(if (lang == "ar") "ديون شخصية لنا" else "Dettes à nous", personalDebtsOwedToMe, Color(0xFF00796B)))
+    }
+    if (personalDebtsOwedByMe > 0.0) {
+        items.add(ChartItem(if (lang == "ar") "ديون شخصية علينا" else "Dettes sur nous", personalDebtsOwedByMe, Color(0xFF8D6E63)))
+    }
+
+    if (personalExpenses != null && shopExpenses != null) {
+        if (shopExpenses > 0.0) {
+            items.add(ChartItem(if (lang == "ar") "مصاريف المحل" else "Dépenses Atelier", shopExpenses, Color(0xFFFF9800)))
+        }
+        if (personalExpenses > 0.0) {
+            items.add(ChartItem(if (lang == "ar") "المصاريف الشخصية" else "Dépenses Personnelles", personalExpenses, Color(0xFFEC407A)))
+        }
+    } else {
+        if (expenses > 0.0) {
+            items.add(ChartItem(if (lang == "ar") "المصاريف" else "Dépenses", expenses, Color(0xFFE53935)))
+        }
+    }
+    
+    items.add(ChartItem(if (lang == "ar") "صافي الربح" else "Profit", profit, MaterialTheme.colorScheme.primary))
 
     Column(
         modifier = Modifier

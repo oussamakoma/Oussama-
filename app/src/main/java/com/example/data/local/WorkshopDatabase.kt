@@ -16,7 +16,13 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
     }
 }
 
-@Database(entities = [WorkshopTransaction::class, PersonalDebt::class, InstallmentPayment::class, RefurbishedDevice::class, MaintenanceExpense::class], version = 11, exportSchema = false)
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE workshop_transactions ADD COLUMN isPrepaid INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [WorkshopTransaction::class, PersonalDebt::class, InstallmentPayment::class, RefurbishedDevice::class, MaintenanceExpense::class], version = 12, exportSchema = false)
 abstract class WorkshopDatabase : RoomDatabase() {
     abstract val transactionDao: TransactionDao
     abstract val personalDebtDao: PersonalDebtDao

@@ -1,5 +1,6 @@
 package com.example.ui.theme
 
+import androidx.compose.ui.geometry.Offset
 import android.graphics.BlurMaskFilter
 import android.graphics.RenderEffect
 import android.graphics.Shader
@@ -39,6 +40,48 @@ import androidx.compose.ui.graphics.SolidColor
  * and fluid interactive components for the 'Warshaty' app.
  */
 
+fun Modifier.liquidGlass(
+    cornerRadius: Dp = 22.dp,
+    backgroundAlpha: Float = 0.25f
+): Modifier = this
+    .clip(RoundedCornerShape(cornerRadius))
+    .background(Color.White.copy(alpha = backgroundAlpha))
+    .then(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Modifier.graphicsLayer {
+                renderEffect = RenderEffect
+                    .createBlurEffect(40f, 40f, Shader.TileMode.CLAMP)
+                    .asComposeRenderEffect()
+            }
+        } else Modifier.blur(20.dp)
+    )
+    .border(
+        width = 1.2.dp,
+        brush = Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.75f),  // top specular
+                Color.White.copy(alpha = 0.20f)   // bottom depth
+            )
+        ),
+        shape = RoundedCornerShape(cornerRadius)
+    )
+    .drawWithContent {
+        drawContent()
+        // diagonal specular overlay — the glass shine
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.40f),
+                    Color.White.copy(alpha = 0.08f),
+                    Color.Transparent,
+                    Color.White.copy(alpha = 0.06f)
+                ),
+                start = Offset(0f, 0f),
+                end = Offset(size.width, size.height)
+            )
+        )
+    }
+
 @Composable
 fun GlassmorphismContainer(
     modifier: Modifier = Modifier,
@@ -47,98 +90,12 @@ fun GlassmorphismContainer(
     isDark: Boolean = isSystemInDarkTheme(),
     content: @Composable ColumnScope.() -> Unit
 ) {
-    // Beautifully translucent glass color base with proper alphas
-    val glassColor = if (isDark) {
-        Color(0x551E1E2E) // Dark slate frosted glass translucent backing
-    } else {
-        Color(0x66FFFFFF) // Ultra bright reflective pure frosted glass base
-    }
-
-    // Dynamic, high-fidelity specular borders mimicking live ambient reflections
-    val specularGradient = Brush.linearGradient(
-        colors = if (isDark) {
-            listOf(
-                Color.White.copy(alpha = 0.22f),
-                Color.White.copy(alpha = 0.04f),
-                Color(0xFF007AFF).copy(alpha = 0.15f),
-                Color.White.copy(alpha = 0.08f)
-            )
-        } else {
-            listOf(
-                Color.White.copy(alpha = 0.65f),
-                Color.White.copy(alpha = 0.10f),
-                Color(0xFF007AFF).copy(alpha = 0.25f),
-                Color.White.copy(alpha = 0.30f)
-            )
-        }
-    )
-
-    Box(
+    Column(
         modifier = modifier
-    ) {
-        // LAYER 1: The isolated fully hardware-blurred frosted glass backplate
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .graphicsLayer {
-                    clip = true
-                    shape = RoundedCornerShape(cornerRadius)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        renderEffect = RenderEffect.createBlurEffect(
-                            30f, 30f, Shader.TileMode.CLAMP
-                        ).asComposeRenderEffect()
-                    }
-                }
-                .background(glassColor, RoundedCornerShape(cornerRadius))
-                .drawBehind {
-                    drawIntoCanvas { canvas ->
-                        val paint = androidx.compose.ui.graphics.Paint()
-                        val frameworkPaint = paint.asFrameworkPaint()
-                        frameworkPaint.color = if (isDark) {
-                            0x2D000000.toInt()
-                        } else {
-                            0x14007AFF.toInt()
-                        }
-                        frameworkPaint.maskFilter = BlurMaskFilter(20f, BlurMaskFilter.Blur.NORMAL)
-                        canvas.drawRoundRect(
-                            left = -4f,
-                            top = -4f,
-                            right = size.width + 4f,
-                            bottom = size.height + 4f,
-                            radiusX = cornerRadius.toPx(),
-                            radiusY = cornerRadius.toPx(),
-                            paint = paint
-                        )
-                    }
-                }
-        )
-
-        // LAYER 2: The actual crisp text & icons content layer with reflective specular border
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(
-                    width = borderWidth,
-                    brush = specularGradient,
-                    shape = RoundedCornerShape(cornerRadius)
-                )
-                .drawWithContent {
-                    drawContent()
-                    // Mirror reflection specular overlay
-                    drawRect(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = if (isDark) 0.04f else 0.12f),
-                                Color.Transparent,
-                                Color.White.copy(alpha = if (isDark) 0.02f else 0.06f)
-                            )
-                        )
-                    )
-                }
-                .padding(16.dp),
-            content = content
-        )
-    }
+            .liquidGlass(cornerRadius = cornerRadius, backgroundAlpha = 0.25f)
+            .padding(16.dp),
+        content = content
+    )
 }
 
 @Composable

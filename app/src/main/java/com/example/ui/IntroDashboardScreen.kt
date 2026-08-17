@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +50,8 @@ import com.example.ui.theme.ProfitGreen
 import com.example.ui.theme.SoftwarePurple
 import com.example.ui.theme.Translator
 import com.example.ui.viewmodel.WorkshopViewModel
+import com.example.ui.components.StatsGridItem
+import com.example.ui.components.LegendIndicator
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -58,6 +61,19 @@ data class DailyChartPoint(
     val income: Double,
     val expense: Double,
     val transactions: List<WorkshopTransaction>
+)
+
+data class StatsMetrics(
+    val revenue: Double,
+    val partsCost: Double,
+    val expensesCost: Double,
+    val personalExpenses: Double = 0.0,
+    val shopExpenses: Double = 0.0,
+    val workshopNetProfit: Double = 0.0,
+    val totalProfit: Double,
+    val workshopDebts: Double = 0.0,
+    val personalDebtsOwedToMe: Double = 0.0,
+    val personalDebtsOwedByMe: Double = 0.0
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,6 +94,7 @@ fun IntroDashboardScreen(
     var showStartingBalanceHelp by remember { mutableStateOf(false) }
     var showPaidDebtsHelp by remember { mutableStateOf(false) }
     var showReceivedDebtsHelp by remember { mutableStateOf(false) }
+    var showCashFlowHelp by remember { mutableStateOf(false) }
     val subTabMode = if (isStatsPage) "STATS" else "BUDGE"
 
     val pocketInit by viewModel.walletPocketInit.collectAsStateWithLifecycle()
@@ -95,34 +112,52 @@ fun IntroDashboardScreen(
     val goodsInclude by viewModel.walletGoodsInclude.collectAsStateWithLifecycle()
     val personalInclude by viewModel.walletPersonalInclude.collectAsStateWithLifecycle()
 
-    val unpaidOwedToMe = personalDebts.filter { it.isOwedToMe && !it.isPaid }.sumOf { debt -> debt.amount - installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid } }
-    val unpaidOwedByMe = personalDebts.filter { !it.isOwedToMe && !it.isPaid }.sumOf { debt -> debt.amount - installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid } }
+    val unpaidOwedToMe = remember(personalDebts, installments) {
+        personalDebts.filter { it.isOwedToMe && !it.isPaid }.sumOf { debt -> debt.amount - installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid } }
+    }
+    val unpaidOwedByMe = remember(personalDebts, installments) {
+        personalDebts.filter { !it.isOwedToMe && !it.isPaid }.sumOf { debt -> debt.amount - installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid } }
+    }
 
-    val pocketChange = transactions.filter { 
-        (it.wallet == pocketName || it.wallet == "مصروف الشهر" || it.wallet == "الصندوق (Pocket)" || it.wallet == "محفظة المحل" || it.wallet.isBlank()) 
-        && it.category != "ACCESSORY" 
-        && it.affectBalance 
-    }.sumOf { it.profit }
+    val pocketChange = remember(transactions, pocketName) {
+        transactions.filter { 
+            (it.wallet == pocketName || it.wallet == "مصروف الشهر" || it.wallet == "الصندوق (Pocket)" || it.wallet == "محفظة المحل" || it.wallet.isBlank()) 
+            && it.category != "ACCESSORY" 
+            && it.affectBalance 
+        }.sumOf { 
+            it.cashFlow
+        }
+    }
     val pocketBalance = pocketInit + pocketChange
 
-    val bankChange = transactions.filter { 
-        (it.wallet == bankName || it.wallet == "حساب بنكي") 
-        && it.category != "ACCESSORY" 
-        && it.affectBalance 
-    }.sumOf { it.profit }
+    val bankChange = remember(transactions, bankName) {
+        transactions.filter { 
+            (it.wallet == bankName || it.wallet == "حساب بنكي") 
+            && it.category != "ACCESSORY" 
+            && it.affectBalance 
+        }.sumOf { 
+            it.cashFlow
+        }
+    }
     val bankBalance = bankInit + bankChange
 
-    val goodsChange = transactions.filter { 
-        it.category == "ACCESSORY" 
-        && it.affectBalance 
-    }.sumOf { it.profit }
+    val goodsChange = remember(transactions) {
+        transactions.filter { 
+            it.category == "ACCESSORY" 
+            && it.affectBalance 
+        }.sumOf { it.cashFlow }
+    }
     val goodsBalance = goodsInit + goodsChange
 
-    val personalChange = transactions.filter { 
-        (it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي") 
-        && it.category != "ACCESSORY" 
-        && it.affectBalance 
-    }.sumOf { it.profit }
+    val personalChange = remember(transactions, personalName) {
+        transactions.filter { 
+            (it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي") 
+            && it.category != "ACCESSORY" 
+            && it.affectBalance 
+        }.sumOf { 
+            it.cashFlow
+        }
+    }
     val personalBalance = personalInit + personalChange
 
     val totalBalance = (if (pocketInclude) pocketBalance else 0.0) +
@@ -131,37 +166,48 @@ fun IntroDashboardScreen(
                        (if (personalInclude) personalBalance else 0.0)
 
     // Dashboard time filter: TODAY, MONTH, ALL, CUSTOM
-    var timeFilter by remember { mutableStateOf("ALL") }
+    var timeFilter by rememberSaveable { mutableStateOf("ALL") }
     // Category group filter: ALL, MAINTENANCE, SALES
-    var categoryGroupFilter by remember { mutableStateOf("ALL") }
+    var categoryGroupFilter by rememberSaveable { mutableStateOf("ALL") }
     // Month navigation offset used when MONTH filter is selected
-    var monthOffset by remember { mutableStateOf(0) }
+    var monthOffset by rememberSaveable { mutableStateOf(0) }
     // Custom date picker range states
-    var customStartDate by remember { mutableStateOf<Long?>(null) }
-    var customEndDate by remember { mutableStateOf<Long?>(null) }
+    var customStartDate by rememberSaveable { mutableStateOf<Long?>(null) }
+    var customEndDate by rememberSaveable { mutableStateOf<Long?>(null) }
 
-    val now = System.currentTimeMillis()
+    // Dynamic date keys evaluated on composition to react immediately when midnight or month passes
+    val currentCalendar = Calendar.getInstance()
+    val currentDayKey = currentCalendar.get(Calendar.YEAR) * 1000 + currentCalendar.get(Calendar.DAY_OF_YEAR)
+    val currentMonthKey = currentCalendar.get(Calendar.YEAR) * 100 + currentCalendar.get(Calendar.MONTH)
 
-    // Calculate core metrics for the stable top visual rows
-    val todayTransactions = transactions.filter { isSameDay(it.date, now) }
-    val todayMaintenanceProfit = todayTransactions.filter { isMaintenance(it.category) }.sumOf { it.profit }
-    val todaySalesProfit = todayTransactions.filter { isSales(it.category) }.sumOf { it.profit }
-    val todayExpense = todayTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice }
-    val todayNetProfit = (todayMaintenanceProfit + todaySalesProfit) - todayExpense
-    val todayOpsCount = todayTransactions.size
+    // Calculate core metrics for the stable top visual rows (with optimized remember and proper REFURB profit math)
+    val todayTransactions = remember(transactions, currentDayKey) { transactions.filter { isSameDay(it.date) } }
+    val todayMaintenanceProfit = remember(todayTransactions) { todayTransactions.filter { isMaintenance(it.category) }.sumOf { it.profit } }
+    val todaySalesProfit = remember(todayTransactions) {
+        todayTransactions.filter { isSales(it.category) }.sumOf {
+            it.cashFlow
+        }
+    }
+    val todayExpense = remember(todayTransactions) { todayTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice } }
+    val todayNetProfit = remember(todayMaintenanceProfit, todaySalesProfit, todayExpense) { (todayMaintenanceProfit + todaySalesProfit) - todayExpense }
+    val todayOpsCount = remember(todayTransactions) { todayTransactions.size }
 
-    val monthTransactions = transactions.filter { isSameMonth(it.date, now) }
-    val monthMaintenanceProfit = monthTransactions.filter { isMaintenance(it.category) }.sumOf { it.profit }
-    val monthSalesProfit = monthTransactions.filter { isSales(it.category) }.sumOf { it.profit }
-    val monthExpense = monthTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice }
-    val monthNetProfit = (monthMaintenanceProfit + monthSalesProfit) - monthExpense
-    val monthOpsCount = monthTransactions.size
+    val monthTransactions = remember(transactions, currentMonthKey) { transactions.filter { isSameMonth(it.date) } }
+    val monthMaintenanceProfit = remember(monthTransactions) { monthTransactions.filter { isMaintenance(it.category) }.sumOf { it.profit } }
+    val monthSalesProfit = remember(monthTransactions) {
+        monthTransactions.filter { isSales(it.category) }.sumOf {
+            it.cashFlow
+        }
+    }
+    val monthExpense = remember(monthTransactions) { monthTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice } }
+    val monthNetProfit = remember(monthMaintenanceProfit, monthSalesProfit, monthExpense) { (monthMaintenanceProfit + monthSalesProfit) - monthExpense }
+    val monthOpsCount = remember(monthTransactions) { monthTransactions.size }
 
     // Filter operations dynamically based on visual selections
-    val filteredForDashboard = remember(transactions, timeFilter, categoryGroupFilter, monthOffset, customStartDate, customEndDate) {
+    val filteredForDashboard = remember(transactions, timeFilter, categoryGroupFilter, monthOffset, customStartDate, customEndDate, currentDayKey, currentMonthKey) {
         transactions.filter { trx ->
             val dateMatches = when (timeFilter) {
-                "TODAY" -> isSameDay(trx.date, now)
+                "TODAY" -> isSameDay(trx.date)
                 "MONTH" -> isSameMonthOffset(trx.date, monthOffset)
                 "CUSTOM" -> {
                     val start = customStartDate
@@ -191,6 +237,8 @@ fun IntroDashboardScreen(
                 "SALES" -> isSales(trx.category)
                 "INCOME" -> trx.category != "EXPENSE"
                 "EXPENSE" -> trx.category == "EXPENSE"
+                "PERSONAL_EXPENSE" -> trx.category == "EXPENSE" && (trx.wallet == personalName || trx.wallet == "مصروف شخصي" || trx.wallet == "مصروفي شخصي" || trx.wallet == "مصروفي الشخصي")
+                "SHOP_EXPENSE" -> (trx.category == "EXPENSE" && !(trx.wallet == personalName || trx.wallet == "مصروف شخصي" || trx.wallet == "مصروفي شخصي" || trx.wallet == "مصروفي الشخصي")) || (trx.category != "EXPENSE" && trx.category != "DEBT" && trx.costPrice > 0)
                 "ALL" -> true // show everything (both income and expenses)
                 else -> trx.category != "EXPENSE" // display core workshop operations by default (all except plain expense)
             }
@@ -199,10 +247,10 @@ fun IntroDashboardScreen(
     }
 
     // Interactive Donut Chart division counters
-    val timeFilteredTransactions = remember(transactions, timeFilter, monthOffset, customStartDate, customEndDate) {
+    val timeFilteredTransactions = remember(transactions, timeFilter, monthOffset, customStartDate, customEndDate, currentDayKey, currentMonthKey) {
         transactions.filter { trx ->
             when (timeFilter) {
-                "TODAY" -> isSameDay(trx.date, now)
+                "TODAY" -> isSameDay(trx.date)
                 "MONTH" -> isSameMonthOffset(trx.date, monthOffset)
                 "CUSTOM" -> {
                     val start = customStartDate
@@ -230,9 +278,48 @@ fun IntroDashboardScreen(
         }
     }
 
-    val incomeFiltered = timeFilteredTransactions.filter { it.category != "EXPENSE" }.sumOf { it.profit.coerceAtLeast(0.0) }
-    val expensesFiltered = timeFilteredTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice }
-    val totalProfitFiltered = incomeFiltered - expensesFiltered
+    val initialBalancesForStats = remember(timeFilter, pocketInit, bankInit, goodsInit, personalInit) {
+        if (timeFilter == "ALL") (pocketInit + bankInit + goodsInit + personalInit) else 0.0
+    }
+
+    val profitFilteredTransactions = remember(timeFilteredTransactions) {
+        timeFilteredTransactions
+    }
+    val incomeFiltered = remember(profitFilteredTransactions) {
+        val baseRevenue = profitFilteredTransactions.filter { it.isDelivered && it.category != "DEBT" }.sumOf { it.sellingPrice }
+        val debtRevenue = profitFilteredTransactions.filter { it.category == "DEBT" && it.profit > 0 }.sumOf { it.profit }
+        baseRevenue + debtRevenue
+    }
+    val personalExpensesFiltered = remember(profitFilteredTransactions, personalName) {
+        profitFilteredTransactions.filter { 
+            it.category == "EXPENSE" && 
+            (it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي")
+        }.sumOf { it.costPrice }
+    }
+    val shopExpensesFiltered = remember(profitFilteredTransactions, personalName) {
+        val partsCost = profitFilteredTransactions.filter { 
+            it.category != "EXPENSE" && 
+            it.category != "DEBT" && 
+            !(it.category == "REFURB" && it.title.startsWith("بيع"))
+        }.sumOf { it.costPrice }
+        
+        val baseExpenses = profitFilteredTransactions.filter { 
+            it.category == "EXPENSE" && 
+            !(it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي")
+        }.sumOf { it.costPrice }
+        
+        val negativeDebt = profitFilteredTransactions.filter { it.category == "DEBT" && it.profit < 0 }.sumOf { -it.profit }
+        
+        partsCost + baseExpenses + negativeDebt
+    }
+    val expensesFiltered = remember(personalExpensesFiltered, shopExpensesFiltered) {
+        personalExpensesFiltered + shopExpensesFiltered
+    }
+    val totalProfitFiltered = remember(profitFilteredTransactions) {
+        profitFilteredTransactions.sumOf { 
+            it.cashFlow
+        }
+    }
 
     val dailyTrendPoints = remember(transactions, lang) {
         val list = mutableListOf<DailyChartPoint>()
@@ -263,8 +350,18 @@ fun IntroDashboardScreen(
                 trx.date >= startOfDay.timeInMillis && trx.date <= endOfDay.timeInMillis
             }
             
-            val inc = dayTransactions.filter { it.category != "EXPENSE" }.sumOf { it.profit.coerceAtLeast(0.0) }
-            val exp = dayTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice }
+            val inc = dayTransactions.sumOf { 
+                if (it.category == "REFURB" && it.title.startsWith("بيع")) {
+                    it.sellingPrice
+                } else {
+                    it.cashFlow.coerceAtLeast(0.0)
+                }
+            }
+            val exp = dayTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice } + 
+                      dayTransactions.filter { it.category != "EXPENSE" }.sumOf { 
+                          val p = it.cashFlow
+                          if (p < 0.0) -p else 0.0
+                      }
             
             // Format day and date labels natively from the system phone calendar/locale settings
             val dayOfWeek = dayCal.get(Calendar.DAY_OF_WEEK)
@@ -345,7 +442,7 @@ fun IntroDashboardScreen(
     var selectedDayIndex by remember { mutableStateOf<Int?>(null) }
 
     // Dynamic starting and end of period bounds for initial balance calculation
-    val periodStart = remember(transactions, timeFilter, monthOffset, customStartDate) {
+    val periodStart = remember(transactions, timeFilter, monthOffset, customStartDate, currentDayKey, currentMonthKey) {
         val calendar = Calendar.getInstance()
         when (timeFilter) {
             "TODAY" -> {
@@ -379,7 +476,7 @@ fun IntroDashboardScreen(
         }
     }
 
-    val periodEnd = remember(transactions, timeFilter, monthOffset, customEndDate) {
+    val periodEnd = remember(transactions, timeFilter, monthOffset, customEndDate, currentDayKey, currentMonthKey) {
         val calendar = Calendar.getInstance()
         when (timeFilter) {
             "TODAY" -> {
@@ -411,6 +508,72 @@ fun IntroDashboardScreen(
             }
             else -> Long.MAX_VALUE
         }
+    }
+
+    val statsMetrics = remember(timeFilteredTransactions, personalName, personalDebts, installments, periodStart, periodEnd, timeFilter) {
+        val revenue = timeFilteredTransactions.filter { it.isDelivered && it.category != "DEBT" }.sumOf { it.sellingPrice } + 
+                      timeFilteredTransactions.filter { it.category == "DEBT" && it.profit > 0 }.sumOf { it.profit }
+                      
+        val partsCost = timeFilteredTransactions.filter { 
+            it.isDelivered &&
+            it.category != "EXPENSE" && 
+            it.category != "DEBT" && 
+            !(it.category == "REFURB" && it.title.startsWith("بيع"))
+        }.sumOf { it.costPrice }
+        
+        val undeliveredParts = timeFilteredTransactions.filter {
+            !it.isDelivered &&
+            it.category != "EXPENSE" && 
+            it.category != "DEBT" && 
+            !(it.category == "REFURB" && it.title.startsWith("بيع"))
+        }.sumOf { it.costPrice }
+        
+        val personalExpenses = timeFilteredTransactions.filter { 
+            it.category == "EXPENSE" && 
+            (it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي")
+        }.sumOf { it.costPrice }
+        
+        val shopExpenses = timeFilteredTransactions.filter { 
+            it.category == "EXPENSE" && 
+            !(it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي")
+        }.sumOf { it.costPrice } + 
+        timeFilteredTransactions.filter { it.category == "DEBT" && it.profit < 0 }.sumOf { -it.profit } +
+        undeliveredParts
+        
+        val expensesCost = personalExpenses + shopExpenses
+        
+        val workshopNetProfit = revenue - partsCost - shopExpenses
+        
+        val totalProfit = timeFilteredTransactions.sumOf { 
+            it.cashFlow
+        }
+
+        val wDebts = timeFilteredTransactions.sumOf { it.creditRemaining }
+
+        val pDebtsOwedToMe = personalDebts.filter { 
+            it.isOwedToMe && !it.isPaid && (timeFilter == "ALL" || it.date in periodStart..periodEnd)
+        }.sumOf { debt -> 
+            debt.amount - installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid } 
+        }
+
+        val pDebtsOwedByMe = personalDebts.filter { 
+            !it.isOwedToMe && !it.isPaid && (timeFilter == "ALL" || it.date in periodStart..periodEnd)
+        }.sumOf { debt -> 
+            debt.amount - installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid } 
+        }
+        
+        StatsMetrics(
+            revenue = revenue,
+            partsCost = partsCost,
+            expensesCost = expensesCost,
+            personalExpenses = personalExpenses,
+            shopExpenses = shopExpenses,
+            workshopNetProfit = workshopNetProfit,
+            totalProfit = totalProfit,
+            workshopDebts = wDebts,
+            personalDebtsOwedToMe = pDebtsOwedToMe,
+            personalDebtsOwedByMe = pDebtsOwedByMe
+        )
     }
 
     val dashboardDisplayItems = remember(filteredForDashboard, categoryGroupFilter, personalDebts, installments, periodStart, periodEnd, lang) {
@@ -487,7 +650,7 @@ fun IntroDashboardScreen(
             totalInitialVal
         } else {
             val preTransactionsChange = transactions.filter { it.date < periodStart }
-                .sumOf { it.profit }
+                .sumOf { it.cashFlow }
             val preLentDebts = personalDebts.filter { it.isOwedToMe && it.date < periodStart }.sumOf { it.amount }
             val preBorrowedDebts = personalDebts.filter { !it.isOwedToMe && it.date < periodStart }.sumOf { it.amount }
             totalInitialVal + preTransactionsChange - preLentDebts + preBorrowedDebts
@@ -517,10 +680,11 @@ fun IntroDashboardScreen(
     val periodFinalBalance = periodStartingBalance + incomeFiltered - expensesFiltered + receivedDebtsFiltered - paidDebtsFiltered + periodBorrowedDebtsInflow - periodLentDebtsOutflow
 
     // Percentage of Profit allocations
-    val totalSumForPercent = incomeFiltered + expensesFiltered
+    val totalSumForPercent = incomeFiltered + personalExpensesFiltered + shopExpensesFiltered
 
-    val incomePercent = if (totalSumForPercent > 0) (incomeFiltered / totalSumForPercent).toFloat() else 0.5f
-    val expensePercent = if (totalSumForPercent > 0) (expensesFiltered / totalSumForPercent).toFloat() else 0.5f
+    val incomePercent = if (totalSumForPercent > 0) (incomeFiltered / totalSumForPercent).toFloat() else 0.4f
+    val personalExpensePercent = if (totalSumForPercent > 0) (personalExpensesFiltered / totalSumForPercent).toFloat() else 0.3f
+    val shopExpensePercent = if (totalSumForPercent > 0) (shopExpensesFiltered / totalSumForPercent).toFloat() else 0.3f
 
     // Premium theme-aligned palette
     val budgePurple = MaterialTheme.colorScheme.primary
@@ -569,10 +733,15 @@ fun IntroDashboardScreen(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
         label = "IncomeSweep"
     )
-    val expenseSweepAngle by animateFloatAsState(
-        targetValue = expensePercent * 360f,
+    val personalExpenseSweepAngle by animateFloatAsState(
+        targetValue = personalExpensePercent * 360f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "ExpenseSweep"
+        label = "PersonalExpenseSweep"
+    )
+    val shopExpenseSweepAngle by animateFloatAsState(
+        targetValue = shopExpensePercent * 360f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "ShopExpenseSweep"
     )
 
 
@@ -604,29 +773,10 @@ fun IntroDashboardScreen(
             if (subTabMode == "BUDGE") {
                 // 2. THE SIGNATURE CENTRAL DIAL WHEEL (Budge Space Ring Card)
                 item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(
-                            if (isLiquidTheme) {
-                                Modifier.border(themedCardBorder, RoundedCornerShape(32.dp))
-                            } else {
-                                Modifier.shadow(
-                                    elevation = 16.dp,
-                                    shape = RoundedCornerShape(32.dp),
-                                    ambientColor = budgePurple.copy(alpha = 0.2f),
-                                    spotColor = budgePurple.copy(alpha = 0.3f)
-                                )
-                            }
-                        ),
-                    shape = RoundedCornerShape(32.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = themedCardBgColor
-                    ),
-                    border = if (isLiquidTheme) null else themedCardBorder
-                ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 14.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
@@ -635,46 +785,6 @@ fun IntroDashboardScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(budgePurple.copy(alpha = 0.15f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.DonutLarge,
-                                            contentDescription = "Split indicator icon",
-                                            tint = budgePurple,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Column {
-                                        Text(
-                                            text = translate("stat_split_title", lang),
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = translate("net_earnings", lang),
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-
                             // Selection Switcher (TODAY, MONTH, ALL, CUSTOM)
                             Row(
                                 modifier = Modifier
@@ -967,284 +1077,203 @@ fun IntroDashboardScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            // 1. Premium Allocation Donut Ring with Detailed Legend
-                            Column(
+                            // High-Fidelity 3D Pie Chart Card
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (isLiquidTheme) {
+                                            Modifier.border(themedCardBorder, RoundedCornerShape(24.dp))
+                                        } else {
+                                            Modifier.shadow(
+                                                elevation = 4.dp,
+                                                shape = RoundedCornerShape(24.dp),
+                                                ambientColor = budgePurple.copy(alpha = 0.08f),
+                                                spotColor = budgePurple.copy(alpha = 0.12f)
+                                            )
+                                        }
+                                    ),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = themedCardBgColor
+                                ),
+                                border = if (isLiquidTheme) null else themedCardBorder
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    ThreeDPieChart(
+                                        profit = totalProfitFiltered,
+                                        income = incomeFiltered,
+                                        personal = personalExpensesFiltered,
+                                        shop = shopExpensesFiltered,
+                                        lang = lang
+                                    )
+                                }
+                            }
+
+                            // Beautiful Side-by-Side Financial Cards replacing the Donut Ring Chart and Legend
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                // 1. Collected Income
+                                val isIncomeActive = categoryGroupFilter == "INCOME"
+                                val incomeColor = Color(0xFF10B981)
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(
+                                            if (isIncomeActive) incomeColor.copy(alpha = 0.15f)
+                                            else incomeColor.copy(alpha = 0.05f)
+                                        )
+                                        .border(
+                                            width = if (isIncomeActive) 2.dp else 1.dp,
+                                            color = if (isIncomeActive) incomeColor else incomeColor.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable {
+                                            categoryGroupFilter = if (isIncomeActive) "ALL" else "INCOME"
+                                        }
+                                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    // Left Component: Amplified Donut Ring Chart with beautiful nested inner layers
-                                    val localDensity = androidx.compose.ui.platform.LocalDensity.current
-                                    val emptyPrimaryColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
-                                    Box(
-                                        modifier = Modifier
-                                            .size(150.dp)
-                                            .weight(1.21f),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Canvas(
-                                            modifier = Modifier
-                                                .size(140.dp)
-                                                .pointerInput(totalSumForPercent, incomePercent, expensePercent) {
-                                                    detectTapGestures { offset ->
-                                                        val centerX = size.width / 2f
-                                                        val centerY = size.height / 2f
-                                                        val dx = offset.x - centerX
-                                                        val dy = offset.y - centerY
-                                                        val distance = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
-                                                        
-                                                        val radius = size.width / 2f
-                                                        if (distance <= radius) {
-                                                            val angleRad = Math.atan2(dy.toDouble(), dx.toDouble())
-                                                            var angleDeg = Math.toDegrees(angleRad).toFloat()
-                                                            
-                                                            // Normalize to 12 o'clock start (0 to 360 clockwise)
-                                                            var normalizedAngle = angleDeg + 90f
-                                                            if (normalizedAngle < 0f) {
-                                                                normalizedAngle += 360f
-                                                            }
-                                                            
-                                                            if (totalSumForPercent > 0) {
-                                                                val currentIncSweep = incomePercent * 360f
-                                                                val currentExpSweep = expensePercent * 360f
-                                                                
-                                                                if (normalizedAngle in 0f..currentIncSweep) {
-                                                                    categoryGroupFilter = if (categoryGroupFilter == "INCOME") "ALL" else "INCOME"
-                                                                } else if (normalizedAngle in currentIncSweep..(currentIncSweep + currentExpSweep)) {
-                                                                    categoryGroupFilter = if (categoryGroupFilter == "EXPENSE") "ALL" else "EXPENSE"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                        ) {
-                                            val centerX = size.width / 2f
-                                            val centerY = size.height / 2f
-                                            val insetPx = 4.dp.toPx()
-                                            val radius = (size.width - insetPx * 2) / 2f
-                                            val shiftDp = 5.dp.toPx()
+                                    Text(
+                                        text = if (lang == "ar") "الدخل المحصل" else "Collected Income",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = incomeColor,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = formatWithLoc(incomeFiltered, lang),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = incomeColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
 
-                                            if (totalSumForPercent <= 0) {
-                                                // If there's no data, draw a single beautiful solid primary circle with centered info
-                                                drawCircle(
-                                                    color = emptyPrimaryColor,
-                                                    radius = radius,
-                                                    center = androidx.compose.ui.geometry.Offset(centerX, centerY)
-                                                )
-                                                
-                                                drawIntoCanvas { canvas ->
-                                                    val paint = android.graphics.Paint().apply {
-                                                        color = android.graphics.Color.WHITE
-                                                        textSize = 10.sp.toPx()
-                                                        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-                                                        textAlign = android.graphics.Paint.Align.CENTER
-                                                        isAntiAlias = true
-                                                    }
-                                                    val label = if (lang == "ar") "لا توجد معاملات" else "No Data"
-                                                    canvas.nativeCanvas.drawText(label, centerX, centerY + 3.dp.toPx(), paint)
-                                                }
-                                            } else {
-                                                val incPercentageVal = Math.round(incomePercent * 100).toInt()
-                                                val expPercentageVal = Math.round(expensePercent * 100).toInt()
-
-                                                // --- INCOME SLICE ---
-                                                if (incomePercent > 0f) {
-                                                    val middleAngle = -90f + incomeSweepAngle / 2f
-                                                    val rad = Math.toRadians(middleAngle.toDouble())
-                                                    val shiftX = (shiftDp * Math.cos(rad)).toFloat()
-                                                    val shiftY = (shiftDp * Math.sin(rad)).toFloat()
-
-                                                    val arcTopLeft = androidx.compose.ui.geometry.Offset(
-                                                        centerX - radius + shiftX,
-                                                        centerY - radius + shiftY
-                                                    )
-                                                    val arcSize = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
-
-                                                    drawArc(
-                                                        brush = Brush.linearGradient(
-                                                            listOf(Color(0xFF34D399), Color(0xFF059669))
-                                                        ),
-                                                        startAngle = -90f,
-                                                        sweepAngle = incomeSweepAngle,
-                                                        useCenter = true,
-                                                        topLeft = arcTopLeft,
-                                                        size = arcSize
-                                                    )
-                                                }
-
-                                                // --- EXPENSE SLICE ---
-                                                if (expensePercent > 0f) {
-                                                    val middleAngle = -90f + incomeSweepAngle + expenseSweepAngle / 2f
-                                                    val rad = Math.toRadians(middleAngle.toDouble())
-                                                    val shiftX = (shiftDp * Math.cos(rad)).toFloat()
-                                                    val shiftY = (shiftDp * Math.sin(rad)).toFloat()
-
-                                                    val arcTopLeft = androidx.compose.ui.geometry.Offset(
-                                                        centerX - radius + shiftX,
-                                                        centerY - radius + shiftY
-                                                    )
-                                                    val arcSize = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
-
-                                                    drawArc(
-                                                        brush = Brush.linearGradient(
-                                                            listOf(Color(0xFFFB7185), Color(0xFFE11D48))
-                                                        ),
-                                                        startAngle = -90f + incomeSweepAngle,
-                                                        sweepAngle = expenseSweepAngle,
-                                                        useCenter = true,
-                                                        topLeft = arcTopLeft,
-                                                        size = arcSize
-                                                    )
-                                                }
-
-                                                // --- DRAW LABELS AND PERCENTAGES DIRECTLY ON SLICES ---
-                                                drawIntoCanvas { canvas ->
-                                                    val paintBig = android.graphics.Paint().apply {
-                                                        color = android.graphics.Color.WHITE
-                                                        textSize = 9.5.sp.toPx()
-                                                        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-                                                        textAlign = android.graphics.Paint.Align.CENTER
-                                                        isAntiAlias = true
-                                                    }
-                                                    val paintSmall = android.graphics.Paint().apply {
-                                                        color = android.graphics.Color.argb(230, 255, 255, 255)
-                                                        textSize = 9.sp.toPx()
-                                                        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
-                                                        textAlign = android.graphics.Paint.Align.CENTER
-                                                        isAntiAlias = true
-                                                    }
-
-                                                    if (incomePercent >= 0.08f) {
-                                                        val middleAngle = -90f + incomeSweepAngle / 2f
-                                                        val rad = Math.toRadians(middleAngle.toDouble())
-                                                        val sX = (shiftDp * Math.cos(rad)).toFloat()
-                                                        val sY = (shiftDp * Math.sin(rad)).toFloat()
-                                                        
-                                                        val tX = centerX + sX + (radius * 0.52f * Math.cos(rad)).toFloat()
-                                                        val tY = centerY + sY + (radius * 0.52f * Math.sin(rad)).toFloat()
-
-                                                        val label = if (lang == "ar") "الدخل" else "Revenus"
-                                                        val pct = "$incPercentageVal%"
-
-                                                        canvas.nativeCanvas.drawText(label, tX, tY - 1.dp.toPx(), paintBig)
-                                                        canvas.nativeCanvas.drawText(pct, tX, tY + 11.dp.toPx(), paintSmall)
-                                                    }
-
-                                                    if (expensePercent >= 0.08f) {
-                                                        val middleAngle = -90f + incomeSweepAngle + expenseSweepAngle / 2f
-                                                        val rad = Math.toRadians(middleAngle.toDouble())
-                                                        val sX = (shiftDp * Math.cos(rad)).toFloat()
-                                                        val sY = (shiftDp * Math.sin(rad)).toFloat()
-                                                        
-                                                        val tX = centerX + sX + (radius * 0.52f * Math.cos(rad)).toFloat()
-                                                        val tY = centerY + sY + (radius * 0.52f * Math.sin(rad)).toFloat()
-
-                                                        val label = if (lang == "ar") "المصاريف" else "Dépenses"
-                                                        val pct = "$expPercentageVal%"
-
-                                                        canvas.nativeCanvas.drawText(label, tX, tY - 1.dp.toPx(), paintBig)
-                                                        canvas.nativeCanvas.drawText(pct, tX, tY + 11.dp.toPx(), paintSmall)
-                                                    }
-                                                }
-                                            }
+                                // 2. Personal Expenses
+                                val isPersonalActive = categoryGroupFilter == "PERSONAL_EXPENSE"
+                                val personalColor = Color(0xFFDB2777)
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(
+                                            if (isPersonalActive) personalColor.copy(alpha = 0.15f)
+                                            else personalColor.copy(alpha = 0.05f)
+                                        )
+                                        .border(
+                                            width = if (isPersonalActive) 2.dp else 1.dp,
+                                            color = if (isPersonalActive) personalColor else personalColor.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable {
+                                            categoryGroupFilter = if (isPersonalActive) "ALL" else "PERSONAL_EXPENSE"
                                         }
-                                    }
+                                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = if (lang == "ar") "مصاريف شخصية" else "Personal Expenses",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = personalColor,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = formatWithLoc(personalExpensesFiltered, lang),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = personalColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
 
-                                    // Right Component: Legend lists (Highly interactive with custom ripple selections)
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        horizontalAlignment = Alignment.Start
-                                    ) {
-                                        // Collected Income detail
-                                        val isIncomeActive = categoryGroupFilter == "INCOME"
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(
-                                                    if (isIncomeActive) ProfitGreen.copy(alpha = 0.15f)
-                                                    else ProfitGreen.copy(alpha = 0.05f)
-                                                )
-                                                .border(
-                                                    width = if (isIncomeActive) 2.dp else 1.dp,
-                                                    color = if (isIncomeActive) ProfitGreen else ProfitGreen.copy(alpha = 0.15f),
-                                                    shape = RoundedCornerShape(14.dp)
-                                                )
-                                                .clickable {
-                                                    categoryGroupFilter = if (isIncomeActive) "ALL" else "INCOME"
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF059669)))
-                                                Text(
-                                                    text = if (lang == "ar") "الدخل المحصل" else "Collected Income",
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = formatWithLoc(incomeFiltered, lang),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = Color(0xFF059669)
-                                            )
+                                // 3. Shop & Parts Expenses
+                                val isShopActive = categoryGroupFilter == "SHOP_EXPENSE"
+                                val shopColor = Color(0xFFD97706)
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(
+                                            if (isShopActive) shopColor.copy(alpha = 0.15f)
+                                            else shopColor.copy(alpha = 0.05f)
+                                        )
+                                        .border(
+                                            width = if (isShopActive) 2.dp else 1.dp,
+                                            color = if (isShopActive) shopColor else shopColor.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable {
+                                            categoryGroupFilter = if (isShopActive) "ALL" else "SHOP_EXPENSE"
                                         }
+                                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = if (lang == "ar") "مصاريف المحل والقطع" else "Shop / Spare Parts",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = shopColor,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = formatWithLoc(shopExpensesFiltered, lang),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = shopColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
 
-                                        // Paid Expenses detail
-                                        val isExpenseActive = categoryGroupFilter == "EXPENSE"
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(
-                                                    if (isExpenseActive) budgeCoral.copy(alpha = 0.15f)
-                                                    else budgeCoral.copy(alpha = 0.05f)
-                                                )
-                                                .border(
-                                                    width = if (isExpenseActive) 2.dp else 1.dp,
-                                                    color = if (isExpenseActive) budgeCoral else budgeCoral.copy(alpha = 0.15f),
-                                                    shape = RoundedCornerShape(14.dp)
-                                                )
-                                                .clickable {
-                                                    categoryGroupFilter = if (isExpenseActive) "ALL" else "EXPENSE"
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFDC2626)))
-                                                Text(
-                                                    text = if (lang == "ar") "المصاريف المدفوعة" else "Paid Expenses",
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = formatWithLoc(expensesFiltered, lang),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = Color(0xFFDC2626)
-                                            )
-                                        }
-                                    }
+                                // 4. Net Profit
+                                val profitColor = if (totalProfitFiltered >= 0) ProfitGreen else Color(0xFFEF4444)
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(profitColor.copy(alpha = 0.05f))
+                                        .border(
+                                            width = 1.dp,
+                                            color = profitColor.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = if (lang == "ar") "صافي الربح" else "Net Profit",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = profitColor,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = formatWithLoc(totalProfitFiltered, lang),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = profitColor,
+                                        textAlign = TextAlign.Center
+                                    )
                                 }
                             }
 
@@ -1502,14 +1531,50 @@ fun IntroDashboardScreen(
                                                                                 val isMaint = isMaintenance(trx.category)
                                                                                 val isSl = isSales(trx.category)
                                                                                 
-                                                                                val typeLabel = if (lang == "ar") {
+                                                                                val typeLabel = if (trx.category == "DEBT") (if (lang == "ar") "دين شخصي" else "Debt") else if (lang == "ar") {
                                                                                     if (isMaint) "صيانة" else if (isSl) "بيع" else if (isExp) "مصروف" else "أخرى"
                                                                                 } else {
                                                                                     if (isMaint) "Repair" else if (isSl) "Sale" else if (isExp) "Expense" else "Other"
                                                                                 }
 
-                                                                                val indicatorColor = if (isExp) Color(0xFFFB7185) else if (isMaint) Color(0xFF34D399) else Color(0xFF60A5FA)
-                                                                                val amountText = if (isExp) {
+                                                                                val (amountValPopup, rawColorPopup, prefixPopup) = when (trx.category) {
+                                                                                    "EXPENSE" -> Triple(trx.costPrice, Color(0xFFFB7185), "-")
+                                                                                    "DEBT" -> {
+                                                                                        val isOwedToMe = trx.costPrice >= trx.sellingPrice
+                                                                                        if (trx.isDelivered) {
+                                                                                            Triple(0.0, Color.White.copy(alpha = 0.5f), "+")
+                                                                                        } else {
+                                                                                            if (isOwedToMe) {
+                                                                                                val unpaid = trx.costPrice - trx.sellingPrice
+                                                                                                Triple(unpaid, Color(0xFFFB7185), "-")
+                                                                                            } else {
+                                                                                                val unpaid = trx.sellingPrice - trx.costPrice
+                                                                                                Triple(unpaid, Color(0xFF34D399), "+")
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                    else -> {
+                                                                                        if (trx.sellingPrice == 0.0 && trx.costPrice > 0.0) {
+                                                                                            Triple(trx.costPrice, Color(0xFFFB7185), "-")
+                                                                                        } else if (trx.isDelivered || trx.isPrepaid) {
+                                                                                            Triple(trx.profit, Color(0xFF34D399), "+")
+                                                                                        } else {
+                                                                                            Triple(trx.costPrice, Color(0xFFFB7185), "-")
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                                val indicatorColor = if (trx.category == "DEBT") {
+                                                                                    rawColorPopup
+                                                                                } else if (trx.sellingPrice == 0.0 && trx.costPrice > 0.0) {
+                                                                                    Color(0xFFFB7185)
+                                                                                } else if (isExp) {
+                                                                                    Color(0xFFFB7185)
+                                                                                } else if (isMaint) {
+                                                                                    Color(0xFF34D399)
+                                                                                } else {
+                                                                                    Color(0xFF60A5FA)
+                                                                                }
+                                                                                val amountText = prefixPopup + formatWithLoc(amountValPopup, lang); val dummyAmountText = if (isExp) {
                                                                                     "-${formatWithLoc(trx.costPrice, lang)}"
                                                                                 } else {
                                                                                     "+${formatWithLoc(trx.sellingPrice, lang)}"
@@ -1720,7 +1785,7 @@ fun IntroDashboardScreen(
                                 }
 
                                 // 2. Interactive 2x2 Grid for Income, Expenses, and Debts (Clickable filters)
-                                // Row 1: Income & Expenses
+                                // Row 1: Income & Shop Expenses
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1784,23 +1849,24 @@ fun IntroDashboardScreen(
                                         }
                                     }
 
-                                    // Expenses Card
-                                    val isExpenseActive = categoryGroupFilter == "EXPENSE"
+                                    // Personal Expenses Card
+                                    val isPersonalActive = categoryGroupFilter == "PERSONAL_EXPENSE"
+                                    val personalColor = Color(0xFFEC407A)
                                     Card(
                                         modifier = Modifier
                                             .weight(1f)
                                             .clip(RoundedCornerShape(16.dp))
                                             .background(
-                                                if (isExpenseActive) budgeCoral.copy(alpha = 0.12f)
-                                                else budgeCoral.copy(alpha = 0.05f)
+                                                if (isPersonalActive) personalColor.copy(alpha = 0.12f)
+                                                else personalColor.copy(alpha = 0.05f)
                                             )
                                             .border(
-                                                width = if (isExpenseActive) 2.dp else 1.dp,
-                                                color = if (isExpenseActive) budgeCoral else budgeCoral.copy(alpha = 0.2f),
+                                                width = if (isPersonalActive) 2.dp else 1.dp,
+                                                color = if (isPersonalActive) personalColor else personalColor.copy(alpha = 0.2f),
                                                 shape = RoundedCornerShape(16.dp)
                                             )
                                             .clickable {
-                                                categoryGroupFilter = if (isExpenseActive) "ALL" else "EXPENSE"
+                                                categoryGroupFilter = if (isPersonalActive) "ALL" else "PERSONAL_EXPENSE"
                                             }
                                             .padding(14.dp),
                                         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
@@ -1813,42 +1879,104 @@ fun IntroDashboardScreen(
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.ArrowUpward,
-                                                    contentDescription = "Expense Icon",
-                                                    tint = budgeCoral,
+                                                    contentDescription = "Personal Expense Icon",
+                                                    tint = personalColor,
                                                     modifier = Modifier.size(24.dp)
                                                 )
-                                                if (isExpenseActive) {
+                                                if (isPersonalActive) {
                                                     Box(
                                                         modifier = Modifier
                                                             .size(8.dp)
                                                             .clip(CircleShape)
-                                                            .background(budgeCoral)
+                                                            .background(personalColor)
                                                     )
                                                 }
                                             }
                                             Spacer(modifier = Modifier.height(10.dp))
                                             Text(
-                                                text = if (lang == "ar") "المصاريف المدفوعة" else "Paid Expenses",
+                                                text = if (lang == "ar") "مصروف شخصي" else "Personal Expenses",
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isExpenseActive) budgeCoral else MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = if (isPersonalActive) personalColor else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             Spacer(modifier = Modifier.height(6.dp))
                                             Text(
-                                                text = formatWithLoc(expensesFiltered, lang),
+                                                text = formatWithLoc(personalExpensesFiltered, lang),
                                                 fontSize = 17.sp,
                                                 fontWeight = FontWeight.Black,
-                                                color = budgeCoral
+                                                color = personalColor
                                             )
                                         }
                                     }
                                 }
 
-                                // Row 2: Debts Recovered & Debts Paid
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Row 2: Shop / Spare Parts Expenses & Received Debts
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
+                                    // Shop / Spare Parts Expenses Card
+                                    val isShopActive = categoryGroupFilter == "SHOP_EXPENSE"
+                                    val shopColor = Color(0xFFD97706)
+                                    Card(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(
+                                                if (isShopActive) shopColor.copy(alpha = 0.12f)
+                                                else shopColor.copy(alpha = 0.05f)
+                                            )
+                                            .border(
+                                                width = if (isShopActive) 2.dp else 1.dp,
+                                                color = if (isShopActive) shopColor else shopColor.copy(alpha = 0.2f),
+                                                shape = RoundedCornerShape(16.dp)
+                                            )
+                                            .clickable {
+                                                categoryGroupFilter = if (isShopActive) "ALL" else "SHOP_EXPENSE"
+                                            }
+                                            .padding(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+                                    ) {
+                                        Column {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowUpward,
+                                                    contentDescription = "Shop Expense Icon",
+                                                    tint = shopColor,
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                                if (isShopActive) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(8.dp)
+                                                            .clip(CircleShape)
+                                                            .background(shopColor)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(10.dp))
+                                            Text(
+                                                text = if (lang == "ar") "مصاريف المحل والقطع" else "Shop / Spare Parts",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isShopActive) shopColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = formatWithLoc(shopExpensesFiltered, lang),
+                                                fontSize = 17.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = shopColor
+                                            )
+                                        }
+                                    }
+
                                     // Received Debts Card (ديون مستردة)
                                     val isDebtsActive = categoryGroupFilter == "RECEIVED_DEBTS"
                                     val debtsColor = Color(0xFF0D9488) // Beautiful teal
@@ -1924,13 +2052,19 @@ fun IntroDashboardScreen(
                                             )
                                         }
                                     }
+                                }
 
-                                    // Paid Debts Card (ديون مسددة)
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Row 3: Paid Debts Card (ديون مسددة)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
                                     val isPaidDebtsActive = categoryGroupFilter == "PAID_DEBTS"
-                                    val paidDebtsColor = Color(0xFFE11D48) // Beautiful rose//orange-red
+                                    val paidDebtsColor = Color(0xFFE11D48) // Beautiful rose
                                     Card(
                                         modifier = Modifier
-                                            .weight(1f)
+                                            .fillMaxWidth()
                                             .clip(RoundedCornerShape(16.dp))
                                             .background(
                                                 if (isPaidDebtsActive) paidDebtsColor.copy(alpha = 0.12f)
@@ -2099,6 +2233,308 @@ fun IntroDashboardScreen(
                             )
                         }
                     }
+            }
+
+            // 4.5. Cash Flow Sources Visual Card (تقرير مصادر التدفقات النقدية)
+            item {
+                val cashSales = remember(profitFilteredTransactions) {
+                    profitFilteredTransactions.filter { 
+                        it.isDelivered && (it.category == "ACCESSORY" || it.category == "REFURB") 
+                    }.sumOf { it.sellingPrice }
+                }
+
+                val cashMaintenance = remember(profitFilteredTransactions) {
+                    profitFilteredTransactions.filter { 
+                        it.isDelivered && (it.category == "SCREEN" || it.category == "PARTS" || it.category == "SERVICE" || it.category == "OTHER") 
+                    }.sumOf { it.sellingPrice }
+                }
+
+                val cashLoans = remember(periodBorrowedDebtsInflow, receivedDebtsFiltered, profitFilteredTransactions) {
+                    val debtTrxInflow = profitFilteredTransactions.filter { it.category == "DEBT" && it.sellingPrice > 0 }.sumOf { it.sellingPrice }
+                    periodBorrowedDebtsInflow + receivedDebtsFiltered + debtTrxInflow
+                }
+
+                val totalCashInflows = cashSales + cashMaintenance + cashLoans
+
+                val salesPercent = if (totalCashInflows > 0) (cashSales / totalCashInflows).toFloat() else 0.0f
+                val maintPercent = if (totalCashInflows > 0) (cashMaintenance / totalCashInflows).toFloat() else 0.0f
+                val loansPercent = if (totalCashInflows > 0) (cashLoans / totalCashInflows).toFloat() else 0.0f
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(2.dp, RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), RoundedCornerShape(16.dp)),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Title row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PieChart,
+                                    contentDescription = "Cash Flow Icon",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = if (lang == "ar") "مصادر التدفقات النقدية 📥" else "Cash Flow Sources 📥",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            IconButton(
+                                onClick = { showCashFlowHelp = true },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.HelpOutline,
+                                    contentDescription = "Help Info",
+                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        // Total incoming cash
+                        Column {
+                            Text(
+                                text = if (lang == "ar") "إجمالي التدفقات الواردة" else "Total Incoming Cash",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = formatWithLoc(totalCashInflows, lang),
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Stacked multi-color progress bar
+                        if (totalCashInflows == 0.0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(16.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (lang == "ar") "لا توجد تدفقات نقدية واردة لهذه الفترة" else "No incoming cash flow for this period",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(16.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                            ) {
+                                if (maintPercent > 0f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(maintPercent.coerceAtLeast(0.01f))
+                                            .fillMaxHeight()
+                                            .background(ProfitGreen) // Emerald Green for maintenance
+                                    )
+                                }
+                                if (salesPercent > 0f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(salesPercent.coerceAtLeast(0.01f))
+                                            .fillMaxHeight()
+                                            .background(Color(0xFF3B82F6)) // Dynamic Blue for sales
+                                    )
+                                }
+                                if (loansPercent > 0f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(loansPercent.coerceAtLeast(0.01f))
+                                            .fillMaxHeight()
+                                            .background(Color(0xFF0D9488)) // Teal for loans/debts
+                                    )
+                                }
+                            }
+                        }
+
+                        // Legend / items list
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // 1. Maintenance & Services
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(ProfitGreen)
+                                    )
+                                    Text(
+                                        text = if (lang == "ar") "الصيانة والخدمات" else "Maintenance & Services",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = formatWithLoc(cashMaintenance, lang),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "${String.format(Locale.US, "%.1f", maintPercent * 100)}%",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+
+                            // 2. Sales & Accessories
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF3B82F6))
+                                    )
+                                    Text(
+                                        text = if (lang == "ar") "مبيعات وإكسسوارات" else "Sales & Accessories",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = formatWithLoc(cashSales, lang),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "${String.format(Locale.US, "%.1f", salesPercent * 100)}%",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+
+                            // 3. Loans & Debts
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF0D9488))
+                                    )
+                                    Text(
+                                        text = if (lang == "ar") "ديون وقروض واردة" else "Loans & Received Debts",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = formatWithLoc(cashLoans, lang),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "${String.format(Locale.US, "%.1f", loansPercent * 100)}%",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (showCashFlowHelp) {
+                    AlertDialog(
+                        onDismissRequest = { showCashFlowHelp = false },
+                        title = {
+                            Text(
+                                text = if (lang == "ar") "مصادر التدفقات النقدية ℹ️" else "Cash Flow Sources Explanation",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                        },
+                        text = {
+                            Text(
+                                text = if (lang == "ar") {
+                                    "يوضح هذا التقرير أصل التدفقات المالية الواردة لورشتك لتعرف من أين تأتي الأموال المتوفرة في محفظتك:\n\n" +
+                                    "🔧 الصيانة والخدمات: تشمل تصليح الشاشات، تغيير قطع الغيار، خدمات السوفتوير والفلاش (FRP)، وأعمال الصيانة الأخرى.\n\n" +
+                                    "📱 مبيعات وإكسسوارات: تشمل بيع إكسسوارات الهواتف وعمليات بيع الأجهزة المستعملة أو المجددة.\n\n" +
+                                    "🤝 ديون وقروض واردة: تشمل الديون المستردة من الزبائن للورشة (كريدي مسترجع) والمبالغ التي قمت باقتراضها من الآخرين وتدفق مالي من عمليات الديون."
+                                } else {
+                                    "This report details the origin of incoming cash flows to your workshop, helping you understand where your funds come from:\n\n" +
+                                    "🔧 Maintenance & Services: Includes screen repairs, spare parts, software flashing (FRP), and other general repairs.\n\n" +
+                                    "📱 Sales & Accessories: Includes phone accessories sales, refurbished phone sales, and direct goods trading.\n\n" +
+                                    "🤝 Loans & Received Debts: Includes debt payments received from clients and any money you borrowed from others."
+                                },
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showCashFlowHelp = false }) {
+                                Text(text = if (lang == "ar") "حسناً" else "OK", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    )
                 }
             }
 
@@ -2227,7 +2663,10 @@ fun IntroDashboardScreen(
                             .padding(2.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        items(listOf("ALL", "MAINTENANCE", "SALES", "INCOME", "EXPENSE", "RECEIVED_DEBTS", "PAID_DEBTS")) { key ->
+                        items(
+                            items = listOf("ALL", "MAINTENANCE", "SALES", "INCOME", "PERSONAL_EXPENSE", "SHOP_EXPENSE", "RECEIVED_DEBTS", "PAID_DEBTS"),
+                            key = { it }
+                        ) { key ->
                             val selected = categoryGroupFilter == key
                             Box(
                                 modifier = Modifier
@@ -2246,7 +2685,8 @@ fun IntroDashboardScreen(
                                         "MAINTENANCE" -> translate("f_maint", lang)
                                         "SALES" -> translate("f_sales", lang)
                                         "INCOME" -> translate("income_lbl", lang)
-                                        "EXPENSE" -> translate("expenses_lbl", lang)
+                                        "PERSONAL_EXPENSE" -> if (lang == "ar") "مصروف شخصي" else "Personal Expense"
+                                        "SHOP_EXPENSE" -> if (lang == "ar") "مصاريف محل / قطع" else "Shop Expense"
                                         "RECEIVED_DEBTS" -> if (lang == "ar") "ديون مستردة" else "Debts Received"
                                         "PAID_DEBTS" -> if (lang == "ar") "ديون مسددة" else "Debts Settled"
                                         else -> translate("f_all", lang)
@@ -2290,7 +2730,15 @@ fun IntroDashboardScreen(
                     }
                 }
             } else {
-                items(dashboardDisplayItems.reversed().take(15)) { item ->
+                items(
+                    items = dashboardDisplayItems.reversed().take(15),
+                    key = { item ->
+                        when (item) {
+                            is DashboardItem.Trans -> "trx_${item.trx.id}"
+                            is DashboardItem.DebtOp -> "debt_${item.id}_${item.date}_${item.typeLabel}"
+                        }
+                    }
+                ) { item ->
                     when (item) {
                         is DashboardItem.Trans -> {
                             val trx = item.trx
@@ -2421,11 +2869,35 @@ fun IntroDashboardScreen(
                                         horizontalAlignment = Alignment.End,
                                         verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
-                                        // Primary amount: Selling price (or Cost for pure expenses)
                                         val isExpense = trx.category == "EXPENSE"
-                                        val primaryAmount = if (isExpense) trx.costPrice else trx.sellingPrice
-                                        val primaryColor = if (isExpense) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurface
-                                        val prefix = if (isExpense) "-" else "+"
+                                        // Primary amount: context-aware pricing
+                                        val (primaryAmount, primaryColor, prefix) = when (trx.category) {
+                                            "EXPENSE" -> {
+                                                Triple(trx.costPrice, Color(0xFFEF4444), "-")
+                                            }
+                                            "DEBT" -> {
+                                                val isOwedToMe = trx.costPrice >= trx.sellingPrice
+                                                if (trx.isDelivered) {
+                                                    Triple(0.0, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), "+")
+                                                } else {
+                                                    if (isOwedToMe) {
+                                                        val unpaid = trx.costPrice - trx.sellingPrice
+                                                        Triple(unpaid, Color(0xFFEF4444), "-")
+                                                    } else {
+                                                        val unpaid = trx.sellingPrice - trx.costPrice
+                                                        Triple(unpaid, Color(0xFF10B981), "+")
+                                                    }
+                                                }
+                                            }
+                                            else -> {
+                                                // Screen, Parts, Refurb, Inventory, Service, Accessory, Other etc.
+                                                if (trx.isDelivered || trx.isPrepaid) {
+                                                    Triple(trx.profit, Color(0xFF10B981), "+")
+                                                } else {
+                                                    Triple(trx.costPrice, Color(0xFFEF4444), "-")
+                                                }
+                                            }
+                                        }
                                         Text(
                                             text = prefix + formatWithLoc(primaryAmount, lang),
                                             fontSize = 14.sp,
@@ -2437,6 +2909,7 @@ fun IntroDashboardScreen(
                                         if (trx.costPrice > 0.0 && !isExpense) {
                                             Text(
                                                 text = "الشراء: -${formatWithLoc(trx.costPrice, lang)}",
+                                                textDecoration = if (trx.isDelivered || trx.isPrepaid) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFFEF4444).copy(alpha = 0.85f)
@@ -2445,13 +2918,27 @@ fun IntroDashboardScreen(
 
                                         // Profit display
                                         val isStockTransfer = trx.category == "INVENTORY" || (trx.category == "REFURB" && !trx.isDelivered)
-                                        if (!isExpense && !isStockTransfer) {
-                                            val netProfit = trx.sellingPrice - trx.costPrice
+                                        if (trx.category != "EXPENSE" && trx.category != "DEBT" && (trx.isDelivered || trx.isPrepaid)) {
                                             Text(
-                                                text = "الربح: +${formatWithLoc(netProfit, lang)}",
+                                                text = "${if (lang == "ar") "البيع" else "Vente"}: ${formatWithLoc(trx.sellingPrice, lang)}",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.ExtraBold,
-                                                color = Color(0xFF10B981)
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                            )
+                                        } else if (!isExpense && !isStockTransfer) {
+                                            val netProfit = trx.profit
+                                            val profitLbl = if (trx.category == "DEBT") {
+                                                if (lang == "ar") "الباقي" else "Solde"
+                                            } else {
+                                                if (netProfit >= 0) (if (lang == "ar") "الربح" else "Profit") else (if (lang == "ar") "الخسارة" else "Perte")
+                                            }
+                                            val profitColor = if (netProfit >= 0) Color(0xFF10B981) else Color(0xFFEF4444)
+                                            val profitPrefix = if (netProfit >= 0) "+" else ""
+                                            Text(
+                                                text = "$profitLbl: $profitPrefix${formatWithLoc(netProfit, lang)}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = profitColor
                                             )
                                         } else if (isStockTransfer) {
                                             Text(
@@ -2688,13 +3175,17 @@ fun IntroDashboardScreen(
                     }
                 }
 
-                // 2. Metrics 2x2 grid
+                // 2. Metrics 3x2 grid (Separating Personal from Shop/Operating Expenses)
                 item {
-                    val initialBalancesForStats = if (timeFilter == "ALL") (pocketInit + bankInit + goodsInit + personalInit) else 0.0
-                    val statsRevenue = timeFilteredTransactions.filter { it.isDelivered && it.category != "DEBT" }.sumOf { it.sellingPrice } + timeFilteredTransactions.filter { it.category == "DEBT" && it.profit > 0 }.sumOf { it.profit } + initialBalancesForStats
-                    val statsPartsCost = timeFilteredTransactions.filter { it.category != "EXPENSE" && it.category != "DEBT" && !it.isDelivered }.sumOf { it.costPrice }
-                    val statsExpensesCost = timeFilteredTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice } + timeFilteredTransactions.filter { it.category == "DEBT" && it.profit < 0 }.sumOf { -it.profit }
-                    val statsTotalProfit = timeFilteredTransactions.sumOf { it.profit } + initialBalancesForStats
+                    val statsRevenue = statsMetrics.revenue
+                    val statsPartsCost = statsMetrics.partsCost
+                    val statsShopExpenses = statsMetrics.shopExpenses
+                    val statsWorkshopProfit = statsMetrics.workshopNetProfit
+                    val statsPersonalExpenses = statsMetrics.personalExpenses
+                    val statsTotalProfit = statsMetrics.totalProfit
+                    val statsWorkshopDebts = statsMetrics.workshopDebts
+                    val statsPersonalDebtsOwedToMe = statsMetrics.personalDebtsOwedToMe
+                    val statsPersonalDebtsOwedByMe = statsMetrics.personalDebtsOwedByMe
 
                     Column(
                         modifier = Modifier
@@ -2702,8 +3193,9 @@ fun IntroDashboardScreen(
                             .padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        // --- SECTION 1: INCOME & PROFITS ---
                         Text(
-                            text = if (lang == "ar") "مؤشرات الأداء المالي 📈" else "Indicateurs de Performance 📈",
+                            text = if (lang == "ar") "💰 المداخيل وصافي الأرباح" else "💰 Revenus & Bénéfices",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.onSurface
@@ -2714,7 +3206,7 @@ fun IntroDashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             StatsGridItem(
-                                title = if (lang == "ar") "المجموع المحصل" else "Total Encaissé",
+                                title = if (lang == "ar") "إجمالي المداخيل" else "Total Encaissé",
                                 amount = statsRevenue,
                                 color = Color(0xFF4CAF50),
                                 icon = Icons.Default.AddChart,
@@ -2723,10 +3215,11 @@ fun IntroDashboardScreen(
                             )
 
                             StatsGridItem(
-                                title = if (lang == "ar") "تكاليف قطع الغيار" else "Coût des Pièces",
-                                amount = statsPartsCost,
-                                color = Color(0xFF0288D1),
-                                icon = Icons.Default.Build,
+                                title = if (lang == "ar") "صافي ربح الورشة" else "Bénéfice Atelier",
+                                amount = statsWorkshopProfit,
+                                color = Color(0xFF2E7D32),
+                                icon = Icons.Default.TrendingUp,
+                                isBold = true,
                                 modifier = Modifier.weight(1f),
                                 lang = lang
                             )
@@ -2737,20 +3230,101 @@ fun IntroDashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             StatsGridItem(
-                                title = if (lang == "ar") "مصاريف وديون" else "Dépenses/Dettes",
-                                amount = statsExpensesCost,
-                                color = Color(0xFFE53935),
-                                icon = Icons.Default.Payments,
+                                title = if (lang == "ar") "صافي الأرباح الكلية" else "Bénéfice Net Total",
+                                amount = statsTotalProfit,
+                                color = MaterialTheme.colorScheme.primary,
+                                icon = Icons.Default.AccountBalanceWallet,
+                                isBold = true,
+                                modifier = Modifier.weight(1f),
+                                lang = lang
+                            )
+                        }
+
+                        // --- SECTION 2: COSTS & EXPENSES ---
+                        Text(
+                            text = if (lang == "ar") "💸 تكاليف ومصاريف التشغيل" else "💸 Coûts & Dépenses",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            StatsGridItem(
+                                title = if (lang == "ar") "تكاليف قطع الغيار" else "Coût des Pièces",
+                                amount = statsPartsCost,
+                                color = Color(0xFF0288D1),
+                                icon = Icons.Default.Build,
                                 modifier = Modifier.weight(1f),
                                 lang = lang
                             )
 
                             StatsGridItem(
-                                title = if (lang == "ar") "الربح الصافي" else "Bénéfice Net",
-                                amount = statsTotalProfit,
-                                color = MaterialTheme.colorScheme.primary,
-                                icon = Icons.Default.AccountBalanceWallet,
-                                isBold = true,
+                                title = if (lang == "ar") "مصاريف المحل والتشغيل" else "Dépenses Atelier",
+                                amount = statsShopExpenses,
+                                color = Color(0xFFFF9800),
+                                icon = Icons.Default.Payments,
+                                modifier = Modifier.weight(1f),
+                                lang = lang
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            StatsGridItem(
+                                title = if (lang == "ar") "المصاريف الشخصية" else "Dépenses Personnelles",
+                                amount = statsPersonalExpenses,
+                                color = Color(0xFFEC407A),
+                                icon = Icons.Default.Person,
+                                modifier = Modifier.weight(1f),
+                                lang = lang
+                            )
+                        }
+
+                        // --- SECTION 3: DEBTS & LIABILITIES (USER REQUESTED) ---
+                        Text(
+                            text = if (lang == "ar") "🔍 قسم الديون والالتزامات المالية" else "🔍 Dettes & Créances",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            StatsGridItem(
+                                title = if (lang == "ar") "ديون الورشة على الزبائن" else "Créances Clients",
+                                amount = statsWorkshopDebts,
+                                color = Color(0xFFE53935),
+                                icon = Icons.Default.AssignmentLate,
+                                modifier = Modifier.weight(1f),
+                                lang = lang
+                            )
+
+                            StatsGridItem(
+                                title = if (lang == "ar") "ديون شخصية لنا (قروض)" else "Dettes à nous",
+                                amount = statsPersonalDebtsOwedToMe,
+                                color = Color(0xFF00796B),
+                                icon = Icons.Default.ArrowDownward,
+                                modifier = Modifier.weight(1f),
+                                lang = lang
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            StatsGridItem(
+                                title = if (lang == "ar") "ديون شخصية علينا" else "Dettes sur nous",
+                                amount = statsPersonalDebtsOwedByMe,
+                                color = Color(0xFF8D6E63),
+                                icon = Icons.Default.ArrowUpward,
                                 modifier = Modifier.weight(1f),
                                 lang = lang
                             )
@@ -2760,11 +3334,15 @@ fun IntroDashboardScreen(
 
                 // 3. Comparison Chart Card
                 item {
-                    val initialBalancesForStats = if (timeFilter == "ALL") (pocketInit + bankInit + goodsInit + personalInit) else 0.0
-                    val statsRevenue = timeFilteredTransactions.filter { it.isDelivered && it.category != "DEBT" }.sumOf { it.sellingPrice } + timeFilteredTransactions.filter { it.category == "DEBT" && it.profit > 0 }.sumOf { it.profit } + initialBalancesForStats
-                    val statsPartsCost = timeFilteredTransactions.filter { it.category != "EXPENSE" && it.category != "DEBT" && !it.isDelivered }.sumOf { it.costPrice }
-                    val statsExpensesCost = timeFilteredTransactions.filter { it.category == "EXPENSE" }.sumOf { it.costPrice } + timeFilteredTransactions.filter { it.category == "DEBT" && it.profit < 0 }.sumOf { -it.profit }
-                    val statsTotalProfit = timeFilteredTransactions.sumOf { it.profit } + initialBalancesForStats
+                    val statsRevenue = statsMetrics.revenue
+                    val statsPartsCost = statsMetrics.partsCost
+                    val statsExpensesCost = statsMetrics.expensesCost
+                    val statsPersonalExpenses = statsMetrics.personalExpenses
+                    val statsShopExpenses = statsMetrics.shopExpenses
+                    val statsTotalProfit = statsMetrics.totalProfit
+                    val statsWorkshopDebts = statsMetrics.workshopDebts
+                    val statsPersonalDebtsOwedToMe = statsMetrics.personalDebtsOwedToMe
+                    val statsPersonalDebtsOwedByMe = statsMetrics.personalDebtsOwedByMe
 
                     Card(
                         modifier = Modifier
@@ -2792,7 +3370,12 @@ fun IntroDashboardScreen(
                                 partsCost = statsPartsCost,
                                 expenses = statsExpensesCost,
                                 profit = statsTotalProfit,
-                                lang = lang
+                                lang = lang,
+                                personalExpenses = statsPersonalExpenses,
+                                shopExpenses = statsShopExpenses,
+                                workshopDebts = statsWorkshopDebts,
+                                personalDebtsOwedToMe = statsPersonalDebtsOwedToMe,
+                                personalDebtsOwedByMe = statsPersonalDebtsOwedByMe
                             )
                         }
                     }
@@ -2803,83 +3386,19 @@ fun IntroDashboardScreen(
 }
 }
 
-@Composable
-private fun StatsGridItem(
-    title: String,
-    amount: Double,
-    color: Color,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    isBold: Boolean = false,
-    modifier: Modifier = Modifier,
-    lang: String
-) {
-    Card(
-        modifier = modifier
-            .shadow(4.dp, RoundedCornerShape(20.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = color.copy(alpha = 0.05f)
-        ),
-        shape = RoundedCornerShape(20.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.15f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(color.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = color,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = title,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = formatWithLoc(amount, lang),
-                fontSize = if (isBold) 15.sp else 13.sp,
-                fontWeight = if (isBold) FontWeight.Black else FontWeight.ExtraBold,
-                color = if (isBold) MaterialTheme.colorScheme.onSurface else color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
+
 
 // Struct to store decorative information for the cal representation
 
 // Helper methods to keep calculations pristine
-private fun isSameDay(time1: Long, time2: Long): Boolean {
+private fun isSameDay(time1: Long, time2: Long = System.currentTimeMillis()): Boolean {
     val cal1 = Calendar.getInstance().apply { timeInMillis = time1 }
     val cal2 = Calendar.getInstance().apply { timeInMillis = time2 }
     return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
             cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
 }
 
-private fun isSameMonth(time1: Long, time2: Long): Boolean {
+private fun isSameMonth(time1: Long, time2: Long = System.currentTimeMillis()): Boolean {
     val cal1 = Calendar.getInstance().apply { timeInMillis = time1 }
     val cal2 = Calendar.getInstance().apply { timeInMillis = time2 }
     return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
@@ -3079,4 +3598,425 @@ sealed interface DashboardItem {
         val icon: androidx.compose.ui.graphics.vector.ImageVector
     ) : DashboardItem
 }
+
+@Composable
+fun ThreeDPieChart(
+    profit: Double,
+    income: Double,
+    personal: Double,
+    shop: Double,
+    lang: String,
+    modifier: Modifier = Modifier
+) {
+    var selectedSliceIndex by remember { mutableStateOf(-1) }
+    
+    // Normalize and prevent division by zero or negative values for slices
+    val safeProfit = if (profit > 0.0) profit else 0.0
+    val safeIncome = if (income > 0.0) income else 0.0
+    val safePersonal = if (personal > 0.0) personal else 0.0
+    val safeShop = if (shop > 0.0) shop else 0.0
+    
+    val totalSum = safeProfit + safeIncome + safePersonal + safeShop
+    
+    val targetProfitSweep = if (totalSum > 0.0) (safeProfit / totalSum).toFloat() * 360f else 0f
+    val targetIncomeSweep = if (totalSum > 0.0) (safeIncome / totalSum).toFloat() * 360f else 0f
+    val targetPersonalSweep = if (totalSum > 0.0) (safePersonal / totalSum).toFloat() * 360f else 0f
+    val targetShopSweep = if (totalSum > 0.0) (safeShop / totalSum).toFloat() * 360f else 0f
+
+    val animProfitSweep by animateFloatAsState(
+        targetValue = targetProfitSweep,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "animProfitSweep"
+    )
+    val animIncomeSweep by animateFloatAsState(
+        targetValue = targetIncomeSweep,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "animIncomeSweep"
+    )
+    val animPersonalSweep by animateFloatAsState(
+        targetValue = targetPersonalSweep,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "animPersonalSweep"
+    )
+    val animShopSweep by animateFloatAsState(
+        targetValue = targetShopSweep,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "animShopSweep"
+    )
+
+    // Animated translation offset for slice explosion/pullout
+    val profitExplodeOffset by animateFloatAsState(
+        targetValue = if (selectedSliceIndex == 0) 14f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "profitExplode"
+    )
+    val incomeExplodeOffset by animateFloatAsState(
+        targetValue = if (selectedSliceIndex == 1) 14f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "incomeExplode"
+    )
+    val personalExplodeOffset by animateFloatAsState(
+        targetValue = if (selectedSliceIndex == 2) 14f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "personalExplode"
+    )
+    val shopExplodeOffset by animateFloatAsState(
+        targetValue = if (selectedSliceIndex == 3) 14f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "shopExplode"
+    )
+
+    // Gentle slow 3D floating loop animation
+    val infiniteTransition = rememberInfiniteTransition(label = "floating_3d")
+    val floatOffset by infiniteTransition.animateFloat(
+        initialValue = -5f,
+        targetValue = 5f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = EaseInOutQuad),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "floatOffset"
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Label header for the 3D chart
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.PieChart,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = if (lang == "ar") "الدائرة البيانية الثلاثية الأبعاد التفاعلية" else "Interactive 3D Analytical Chart",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        if (totalSum <= 0.0) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.03f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.Analytics,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (lang == "ar") "لا توجد معاملات كافية لرسم المخطط" else "Insufficient data to draw 3D Chart",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        } else {
+            // High fidelity custom Canvas to render the isometric 3D chart
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(
+                    modifier = Modifier
+                        .width(220.dp)
+                        .height(130.dp)
+                        .pointerInput(totalSum, animProfitSweep, animIncomeSweep, animPersonalSweep, animShopSweep) {
+                            detectTapGestures { offset ->
+                                val centerX = size.width / 2f
+                                val centerY = size.height / 2f
+                                val dx = offset.x - centerX
+                                val dy = offset.y - centerY
+                                val distance = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                                
+                                val radius = size.width * 0.45f
+                                if (distance <= radius && totalSum > 0.0) {
+                                    val angleRad = Math.atan2(dy.toDouble(), dx.toDouble())
+                                    var angleDeg = Math.toDegrees(angleRad).toFloat()
+                                    
+                                    // Normalize to 12 o'clock start (0 to 360 clockwise)
+                                    var normalizedAngle = angleDeg + 90f
+                                    if (normalizedAngle < 0f) {
+                                        normalizedAngle += 360f
+                                    }
+                                    
+                                    val sweep0 = animProfitSweep
+                                    val sweep1 = animIncomeSweep
+                                    val sweep2 = animPersonalSweep
+                                    val sweep3 = animShopSweep
+                                    
+                                    selectedSliceIndex = when {
+                                        normalizedAngle in 0f..sweep0 -> if (selectedSliceIndex == 0) -1 else 0
+                                        normalizedAngle in sweep0..(sweep0 + sweep1) -> if (selectedSliceIndex == 1) -1 else 1
+                                        normalizedAngle in (sweep0 + sweep1)..(sweep0 + sweep1 + sweep2) -> if (selectedSliceIndex == 2) -1 else 2
+                                        normalizedAngle in (sweep0 + sweep1 + sweep2)..(sweep0 + sweep1 + sweep2 + sweep3) -> if (selectedSliceIndex == 3) -1 else 3
+                                        else -> -1
+                                    }
+                                } else {
+                                    selectedSliceIndex = -1
+                                }
+                            }
+                        }
+                ) {
+                    val canvasWidth = size.width
+                    val canvasHeight = size.height
+                    
+                    // We tilt the circle into an isometric ellipse by setting height smaller than width
+                    val rectWidth = canvasWidth * 0.92f
+                    val rectHeight = rectWidth * 0.58f
+                    
+                    val rectLeft = (canvasWidth - rectWidth) / 2f
+                    val rectTop = (canvasHeight - rectHeight - 14.dp.toPx()) / 2f + floatOffset.dp.toPx()
+                    
+                    val rectSize = androidx.compose.ui.geometry.Size(rectWidth, rectHeight)
+                    val depth = 12.dp.toPx()
+                    
+                    // 1. Draw soft elegant shadow under the 3D disk
+                    drawOval(
+                        color = Color.Black.copy(alpha = 0.12f),
+                        topLeft = androidx.compose.ui.geometry.Offset(rectLeft + 4.dp.toPx(), rectTop + depth + 4.dp.toPx()),
+                        size = rectSize
+                    )
+                    
+                    val slices = listOf(
+                        Triple(0, animProfitSweep, Color(0xFF10B981)), // Profit
+                        Triple(1, animIncomeSweep, Color(0xFF34D399)), // Income
+                        Triple(2, animPersonalSweep, Color(0xFFDB2777)), // Personal
+                        Triple(3, animShopSweep, Color(0xFFD97706))  // Shop
+                    )
+                    
+                    // 2. Extrude bottom sides (draw from depth down to 0) to make it look truly 3D solid
+                    for (depthStep in depth.toInt() downTo 0 step 2) {
+                        val currY = rectTop + depthStep.toFloat()
+                        var startAngle = -90f
+                        
+                        slices.forEach { (index, sweep, color) ->
+                            if (sweep > 0f) {
+                                // Darken the color based on depth to simulate shade/extrusion lighting
+                                val factor = 0.65f + (0.35f * (1f - depthStep.toFloat() / depth))
+                                val shadedColor = Color(
+                                    red = (color.red * factor).coerceIn(0f, 1f),
+                                    green = (color.green * factor).coerceIn(0f, 1f),
+                                    blue = (color.blue * factor).coerceIn(0f, 1f),
+                                    alpha = color.alpha
+                                )
+                                
+                                val explodeAmt = when (index) {
+                                    0 -> profitExplodeOffset
+                                    1 -> incomeExplodeOffset
+                                    2 -> personalExplodeOffset
+                                    3 -> shopExplodeOffset
+                                    else -> 0f
+                                }.dp.toPx()
+                                
+                                val middleAngle = startAngle + sweep / 2f
+                                val rad = Math.toRadians(middleAngle.toDouble())
+                                val shiftX = (explodeAmt * Math.cos(rad)).toFloat()
+                                val shiftY = (explodeAmt * Math.sin(rad)).toFloat()
+                                
+                                drawArc(
+                                    color = shadedColor,
+                                    startAngle = startAngle,
+                                    sweepAngle = sweep,
+                                    useCenter = true,
+                                    topLeft = androidx.compose.ui.geometry.Offset(rectLeft + shiftX, currY + shiftY),
+                                    size = rectSize
+                                )
+                                startAngle += sweep
+                            }
+                        }
+                    }
+                    
+                    // 3. Draw top surface (yOffset = 0) with beautiful linear/radial gradient lighting
+                    var startAngle = -90f
+                    slices.forEach { (index, sweep, color) ->
+                        if (sweep > 0f) {
+                            val explodeAmt = when (index) {
+                                0 -> profitExplodeOffset
+                                1 -> incomeExplodeOffset
+                                2 -> personalExplodeOffset
+                                3 -> shopExplodeOffset
+                                else -> 0f
+                            }.dp.toPx()
+                            
+                            val middleAngle = startAngle + sweep / 2f
+                            val rad = Math.toRadians(middleAngle.toDouble())
+                            val shiftX = (explodeAmt * Math.cos(rad)).toFloat()
+                            val shiftY = (explodeAmt * Math.sin(rad)).toFloat()
+
+                            val currentLeft = rectLeft + shiftX
+                            val currentTop = rectTop + shiftY
+                            
+                            // Draw top glossy surface
+                            val gradientBrush = Brush.radialGradient(
+                                colors = listOf(
+                                    color.copy(alpha = 1f),
+                                    Color(
+                                        red = (color.red * 0.9f).coerceIn(0f, 1f),
+                                        green = (color.green * 0.9f).coerceIn(0f, 1f),
+                                        blue = (color.blue * 0.9f).coerceIn(0f, 1f),
+                                        alpha = color.alpha
+                                    )
+                                ),
+                                center = androidx.compose.ui.geometry.Offset(currentLeft + rectWidth / 2f, currentTop + rectHeight / 2f),
+                                radius = rectWidth / 2f
+                            )
+                            
+                            drawArc(
+                                brush = gradientBrush,
+                                startAngle = startAngle,
+                                sweepAngle = sweep,
+                                useCenter = true,
+                                topLeft = androidx.compose.ui.geometry.Offset(currentLeft, currentTop),
+                                size = rectSize
+                            )
+                            
+                            // Draw subtle elegant divider lines on the top surface
+                            val radStart = Math.toRadians(startAngle.toDouble())
+                            val endX = currentLeft + rectWidth / 2f + (rectWidth / 2f) * Math.cos(radStart).toFloat()
+                            val endY = currentTop + rectHeight / 2f + (rectHeight / 2f) * Math.sin(radStart).toFloat()
+                            
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.45f),
+                                start = androidx.compose.ui.geometry.Offset(currentLeft + rectWidth / 2f, currentTop + rectHeight / 2f),
+                                end = androidx.compose.ui.geometry.Offset(endX, endY),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                            
+                            startAngle += sweep
+                        }
+                    }
+                    
+                    // 4. Draw labels inside the top surface slices dynamically
+                    var textStartAngle = -90f
+                    slices.forEach { (index, sweep, color) ->
+                        if (sweep >= 25f) { // Only draw text if slice is wide enough to avoid overlap
+                            val explodeAmt = when (index) {
+                                0 -> profitExplodeOffset
+                                1 -> incomeExplodeOffset
+                                2 -> personalExplodeOffset
+                                3 -> shopExplodeOffset
+                                else -> 0f
+                            }.dp.toPx()
+                            
+                            val middleAngle = textStartAngle + sweep / 2f
+                            val rad = Math.toRadians(middleAngle.toDouble())
+                            
+                            val shiftX = (explodeAmt * Math.cos(rad)).toFloat()
+                            val shiftY = (explodeAmt * Math.sin(rad)).toFloat()
+
+                            val currentLeft = rectLeft + shiftX
+                            val currentTop = rectTop + shiftY
+
+                            // Distance from center to draw label
+                            val distFactor = 0.55f
+                            val labelX = currentLeft + rectWidth / 2f + (rectWidth / 2f * distFactor) * Math.cos(rad).toFloat()
+                            val labelY = currentTop + rectHeight / 2f + (rectHeight / 2f * distFactor) * Math.sin(rad).toFloat()
+                            
+                            val percentage = Math.round((sweep / 360f) * 100).toInt()
+                            
+                            drawIntoCanvas { canvas ->
+                                val paintBig = android.graphics.Paint().apply {
+                                    this.color = android.graphics.Color.WHITE
+                                    this.textSize = 9.5.sp.toPx()
+                                    this.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                                    this.textAlign = android.graphics.Paint.Align.CENTER
+                                    this.isAntiAlias = true
+                                    this.setShadowLayer(4f, 1f, 1.5f, android.graphics.Color.BLACK)
+                                }
+                                canvas.nativeCanvas.drawText("$percentage%", labelX, labelY + 3.dp.toPx(), paintBig)
+                            }
+                        }
+                        textStartAngle += sweep
+                    }
+                }
+            }
+            
+            // Beautiful Legend indicators
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        LegendIndicator(
+                            color = Color(0xFF10B981),
+                            label = if (lang == "ar") "صافي الربح" else "Net Profit",
+                            value = formatWithLoc(profit, lang),
+                            isSelected = selectedSliceIndex == 0,
+                            onClick = {
+                                selectedSliceIndex = if (selectedSliceIndex == 0) -1 else 0
+                            }
+                        )
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        LegendIndicator(
+                            color = Color(0xFF34D399),
+                            label = if (lang == "ar") "الدخل المحصل" else "Collected Income",
+                            value = formatWithLoc(income, lang),
+                            isSelected = selectedSliceIndex == 1,
+                            onClick = {
+                                selectedSliceIndex = if (selectedSliceIndex == 1) -1 else 1
+                            }
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        LegendIndicator(
+                            color = Color(0xFFDB2777),
+                            label = if (lang == "ar") "مصاريف شخصية" else "Personal Expenses",
+                            value = formatWithLoc(personal, lang),
+                            isSelected = selectedSliceIndex == 2,
+                            onClick = {
+                                selectedSliceIndex = if (selectedSliceIndex == 2) -1 else 2
+                            }
+                        )
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        LegendIndicator(
+                            color = Color(0xFFD97706),
+                            label = if (lang == "ar") "مصاريف المحل والقطع" else "Shop Expenses",
+                            value = formatWithLoc(shop, lang),
+                            isSelected = selectedSliceIndex == 3,
+                            onClick = {
+                                selectedSliceIndex = if (selectedSliceIndex == 3) -1 else 3
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 

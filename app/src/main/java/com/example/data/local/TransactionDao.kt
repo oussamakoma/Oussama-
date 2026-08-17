@@ -18,6 +18,15 @@ interface TransactionDao {
     @Delete
     suspend fun deleteTransaction(transaction: WorkshopTransaction)
 
+    @Query("DELETE FROM workshop_transactions WHERE category = 'REFURB' AND date IN (:dates)")
+    suspend fun deleteRefurbTransactionsByDates(dates: List<Long>)
+
+    @Query("DELETE FROM workshop_transactions WHERE category = 'REFURB' AND deviceModel = :deviceModel")
+    suspend fun deleteRefurbTransactionsByModel(deviceModel: String)
+
+    @Query("DELETE FROM workshop_transactions WHERE category = 'REFURB' AND date = :date")
+    suspend fun deleteRefurbTransactionByDate(date: Long)
+
     @Query("SELECT * FROM workshop_transactions WHERE id = :id")
     suspend fun getTransactionById(id: Int): WorkshopTransaction?
 

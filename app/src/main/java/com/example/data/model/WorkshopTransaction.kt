@@ -19,13 +19,60 @@ data class WorkshopTransaction(
     val wallet: String = "محفظة المحل",
     val dueDate: Long? = null,
     val isDelivered: Boolean = true,
-    val affectBalance: Boolean = true
+    val affectBalance: Boolean = true,
+    val isPrepaid: Boolean = false
 ) {
     val profit: Double
-        get() = if (category == "EXPENSE") -costPrice 
-                else if (category == "DEBT") (sellingPrice - costPrice)
-                else if (isDelivered) (sellingPrice - costPrice) 
-                else -costPrice
+        get() {
+            if (category == "EXPENSE") return -costPrice
+            if (category == "DEBT") return (sellingPrice - costPrice)
+            if (category == "REFURB") {
+                if (title.startsWith("بيع")) {
+                    if (creditAmount > 0.0) {
+                        val totalPaid = sellingPrice - creditAmount + creditPaid
+                        return totalPaid - costPrice
+                    }
+                    return sellingPrice - costPrice
+                } else {
+                    return 0.0
+                }
+            }
+            if (isDelivered || isPrepaid) {
+                if (creditAmount > 0.0) {
+                    val totalPaid = sellingPrice - creditAmount + creditPaid
+                    return totalPaid - costPrice
+                } else {
+                    return sellingPrice - costPrice
+                }
+            }
+            return 0.0
+        }
+    val cashFlow: Double
+        get() {
+            if (category == "EXPENSE") return -costPrice
+            if (category == "DEBT") return (sellingPrice - costPrice)
+            if (category == "REFURB") {
+                if (title.startsWith("بيع")) {
+                    if (creditAmount > 0.0) {
+                        return sellingPrice - creditAmount + creditPaid
+                    }
+                    return sellingPrice
+                } else {
+                    return -costPrice
+                }
+            }
+            if (isDelivered || isPrepaid) {
+                if (creditAmount > 0.0) {
+                    val totalPaid = sellingPrice - creditAmount + creditPaid
+                    return totalPaid - costPrice
+                } else {
+                    return sellingPrice - costPrice
+                }
+            }
+            return -costPrice
+        }
+
+
 
     val creditRemaining: Double
         get() = if (creditAmount > creditPaid) creditAmount - creditPaid else 0.0

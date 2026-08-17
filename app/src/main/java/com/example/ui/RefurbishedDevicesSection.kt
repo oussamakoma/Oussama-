@@ -13,6 +13,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +42,7 @@ private fun formatCurrency(amount: Double): String {
 
 @Composable
 fun RefurbishedDevicesSection(viewModel: WorkshopViewModel) {
-    val devices by viewModel.refurbishedDevicesFlow.collectAsState()
+    val devices by viewModel.refurbishedDevicesFlow.collectAsStateWithLifecycle()
     var showAddDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -124,7 +126,7 @@ fun RefurbishedDevicesSection(viewModel: WorkshopViewModel) {
                         }
                     }
                 } else {
-                    items(devices) { device ->
+                    items(devices, key = { it.id }) { device ->
                         DeviceFlippingCard(device, viewModel)
                     }
                 }
@@ -150,7 +152,7 @@ fun RefurbishedDevicesSection(viewModel: WorkshopViewModel) {
 
 @Composable
 fun DeviceFlippingCard(device: RefurbishedDevice, viewModel: WorkshopViewModel) {
-    val expenses by viewModel.getMaintenanceExpensesFlow(device.id).collectAsState(initial = emptyList())
+    val expenses by viewModel.getMaintenanceExpensesFlow(device.id).collectAsStateWithLifecycle(initialValue = emptyList())
     val totalMaintenance = expenses.sumOf { it.cost }
     val totalInvestment = device.purchasePrice + totalMaintenance
     var showAddExpense by remember { mutableStateOf(false) }
@@ -444,13 +446,13 @@ fun FinanceMetric(label: String, value: String, color: Color = MaterialTheme.col
 
 @Composable
 fun AddExpenseDialog(onDismiss: () -> Unit, onConfirm: (String, Double, String) -> Unit) {
-    var partName by remember { mutableStateOf("") }
-    var costStr by remember { mutableStateOf("") }
+    var partName by rememberSaveable { mutableStateOf("") }
+    var costStr by rememberSaveable { mutableStateOf("") }
     
     val dateFormat = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
-    var dateStr by remember { mutableStateOf(dateFormat.format(java.util.Date())) }
+    var dateStr by rememberSaveable { mutableStateOf(dateFormat.format(java.util.Date())) }
     
-    var validationError by remember { mutableStateOf<String?>(null) }
+    var validationError by rememberSaveable { mutableStateOf<String?>(null) }
     
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -514,15 +516,15 @@ fun AddExpenseDialog(onDismiss: () -> Unit, onConfirm: (String, Double, String) 
 
 @Composable
 fun AddDeviceDialog(onDismiss: () -> Unit, onConfirm: (String, String, Double, String, String?) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var serial by remember { mutableStateOf("") }
-    var priceStr by remember { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
+    var serial by rememberSaveable { mutableStateOf("") }
+    var priceStr by rememberSaveable { mutableStateOf("") }
     
     val dateFormat = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
-    var dateStr by remember { mutableStateOf(dateFormat.format(java.util.Date())) }
+    var dateStr by rememberSaveable { mutableStateOf(dateFormat.format(java.util.Date())) }
     
-    var photoUri by remember { mutableStateOf<String?>(null) }
-    var validationError by remember { mutableStateOf<String?>(null) }
+    var photoUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var validationError by rememberSaveable { mutableStateOf<String?>(null) }
     
     val photoPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -664,12 +666,12 @@ fun AddDeviceDialog(onDismiss: () -> Unit, onConfirm: (String, String, Double, S
 
 @Composable
 fun SellDeviceDialog(initialCost: Double, onDismiss: () -> Unit, onConfirm: (Double, Boolean, Double, String?, Long, String?) -> Unit) {
-    var priceStr by remember { mutableStateOf("") }
-    var isCredit by remember { mutableStateOf(false) }
-    var downPaymentStr by remember { mutableStateOf("") }
-    var customerName by remember { mutableStateOf("") }
-    var saleNotes by remember { mutableStateOf("") }
-    var validationError by remember { mutableStateOf<String?>(null) }
+    var priceStr by rememberSaveable { mutableStateOf("") }
+    var isCredit by rememberSaveable { mutableStateOf(false) }
+    var downPaymentStr by rememberSaveable { mutableStateOf("") }
+    var customerName by rememberSaveable { mutableStateOf("") }
+    var saleNotes by rememberSaveable { mutableStateOf("") }
+    var validationError by rememberSaveable { mutableStateOf<String?>(null) }
     
     val currentInput = priceStr.toDoubleOrNull() ?: 0.0
     val expectedProfit = currentInput - initialCost

@@ -36,9 +36,14 @@ import com.example.data.model.PersonalDebt
 import com.example.data.model.InstallmentPayment
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -65,10 +70,14 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.data.model.WorkshopTransaction
 import com.example.data.model.RefurbishedDevice
 import com.example.data.model.MaintenanceExpense
 import com.example.data.api.GeminiManager
+import com.example.ui.components.LiquidGlassBlobBackground
 import kotlinx.coroutines.launch
 import com.example.ui.theme.*
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -94,45 +103,62 @@ class MainActivity : ComponentActivity() {
         WorkshopViewModelFactory(app.repository, app.settingsManager)
     }
 
-    private val exportCsvLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
+    private val exportJsonLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         uri?.let {
-            try {
-                contentResolver.openOutputStream(it)?.use { outputStream ->
-                    val transactions = viewModel.transactionsFlow.value
-                    val debts = viewModel.debtsFlow.value
-                    val csvString = com.example.data.repository.BackupHandler.createCsvBackup(transactions, debts)
-                    outputStream.write(csvString.toByteArray())
-                    Toast.makeText(this, "تم تصدير نسخة الاحتياط بنجاح!", Toast.LENGTH_LONG).show()
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    contentResolver.openOutputStream(it)?.use { outputStream ->
+                        val transactions = viewModel.transactionsFlow.value
+                        val debts = viewModel.debtsFlow.value
+                        val devices = viewModel.refurbishedDevicesFlow.value
+                        val expenses = viewModel.allExpensesFlow.value
+                        val installments = viewModel.installmentsFlow.value
+                        val jsonString = com.example.data.repository.BackupHandler.createJsonBackup(
+                            transactions, debts, devices, expenses, installments
+                        )
+                        outputStream.write(jsonString.toByteArray())
+                    }
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "تم تصدير نسخة الاحتياط بنجاح!", Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "خطأ أثناء حفظ الملف: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            } catch (e: Exception) {
-                Toast.makeText(this, "خطأ أثناء حفظ الملف: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private val importCsvLauncher = registerForActivityResult(
+    private val importJsonLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            try {
-                contentResolver.openInputStream(it)?.use { inputStream ->
-                    val csvData = inputStream.bufferedReader().use { br -> br.readText() }
-                    val pair = com.example.data.repository.BackupHandler.parseCsvBackup(csvData)
-                    if (pair.first.isNotEmpty() || pair.second.isNotEmpty()) {
-                        viewModel.importBackup(pair.first, pair.second)
-                        Toast.makeText(
-                            this,
-                            "تم استيراد ${pair.first.size} عملية و ${pair.second.size} دين بنجاح!",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    } else {
-                        Toast.makeText(this, "فشل الاستيراد: صيغة الملف غير مدعومة أو فارغة.", Toast.LENGTH_LONG).show()
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val data = contentResolver.openInputStream(it)?.use { inputStream ->
+                        inputStream.bufferedReader().use { br -> br.readText() }
+                    } ?: ""
+                    val backupData = com.example.data.repository.BackupHandler.parseBackup(data)
+                    withContext(Dispatchers.Main) {
+                        if (backupData.transactions.isNotEmpty() || backupData.debts.isNotEmpty() || backupData.devices.isNotEmpty()) {
+                            viewModel.importBackup(backupData)
+                            Toast.makeText(
+                                this@MainActivity,
+                                "تم استيراد ${backupData.transactions.size} عملية و ${backupData.debts.size} دين بنجاح!",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            Toast.makeText(this@MainActivity, "فشل الاستيراد: صيغة الملف غير مدعومة أو فارغة.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "خطأ أثناء القراءة: ${e.message}", Toast.LENGTH_LONG).show()
                     }
                 }
-            } catch (e: Exception) {
-                Toast.makeText(this, "خطأ أثناء القراءة: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -150,8 +176,8 @@ class MainActivity : ComponentActivity() {
                 CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
                     WorkshopApp(
                         viewModel = viewModel,
-                        onExportBackup = { exportCsvLauncher.launch("warshati_backup.csv") },
-                        onImportBackup = { importCsvLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv", "text/plain", "*/*")) }
+                        onExportBackup = { exportJsonLauncher.launch("warshati_backup.json") },
+                        onImportBackup = { importJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }
                     )
                 }
             }
@@ -185,12 +211,6 @@ fun WorkshopApp(
     }
     val isLiquidTheme = themeKey == "LIQUID_GLASS"
 
-    var currentTab by remember { mutableStateOf(AppTab.HOME) }
-    var initialCategoryForAdd by remember { mutableStateOf<String?>(null) }
-    var showAddDialog by remember { mutableStateOf(false) }
-    var showAddDebtDialogGlobal by remember { mutableStateOf(false) }
-    var transactionToEdit by remember { mutableStateOf<WorkshopTransaction?>(null) }
-    var showGoogleAssistantDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     val transactions by viewModel.transactionsFlow.collectAsStateWithLifecycle()
@@ -204,6 +224,16 @@ fun WorkshopApp(
     val dateFilter by viewModel.dateFilter.collectAsStateWithLifecycle()
     val deliveryFilter by viewModel.deliveryFilter.collectAsStateWithLifecycle()
 
+    var currentTab by rememberSaveable { mutableStateOf(AppTab.HOME) }
+    var initialCategoryForAdd by rememberSaveable { mutableStateOf<String?>(null) }
+    var showAddDialog by rememberSaveable { mutableStateOf(false) }
+    var showAddDebtDialogGlobal by rememberSaveable { mutableStateOf(false) }
+    var editingTransactionId by rememberSaveable { mutableStateOf<Int?>(null) }
+    val transactionToEdit = remember(editingTransactionId, transactions) {
+        editingTransactionId?.let { id -> transactions.find { it.id == id } }
+    }
+    var showGoogleAssistantDialog by rememberSaveable { mutableStateOf(false) }
+
     // Dialog state
     if (showAddDialog) {
         AddEditTransactionDialog(
@@ -214,8 +244,8 @@ fun WorkshopApp(
                 showAddDialog = false
                 initialCategoryForAdd = null
             },
-            onSave = { title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance ->
-                viewModel.addTransaction(title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance)
+            onSave = { title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance, isPrepaid ->
+                viewModel.addTransaction(title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance, isPrepaid)
                 showAddDialog = false
                 initialCategoryForAdd = null
                 Toast.makeText(context, "تمت إضافة العملية بنجاح!", Toast.LENGTH_SHORT).show()
@@ -227,16 +257,16 @@ fun WorkshopApp(
         AddEditTransactionDialog(
             viewModel = viewModel,
             transaction = transactionToEdit,
-            onDismiss = { transactionToEdit = null },
+            onDismiss = { editingTransactionId = null },
             onDelete = {
-                viewModel.deleteTransaction(transactionToEdit!!)
-                transactionToEdit = null
+                viewModel.deleteTransaction(transactionToEdit)
+                editingTransactionId = null
                 Toast.makeText(context, "تم حذف العملية بنجاح!", Toast.LENGTH_SHORT).show()
             },
-            onSave = { title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance ->
-                viewModel.deleteTransaction(transactionToEdit!!)
-                viewModel.addTransaction(title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance)
-                transactionToEdit = null
+            onSave = { title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance, isPrepaid ->
+                viewModel.deleteTransaction(transactionToEdit)
+                viewModel.addTransaction(title, category, cost, sale, model, name, notes, creditAmount, creditPaid, wallet, dueDate, tDate, isDelivered, affectBalance, isPrepaid)
+                editingTransactionId = null
                 Toast.makeText(context, "تم حفظ التعديلات!", Toast.LENGTH_SHORT).show()
             }
         )
@@ -264,109 +294,199 @@ fun WorkshopApp(
 
     val appLanguage by viewModel.appLanguage.collectAsStateWithLifecycle()
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = Color.Transparent,
-        bottomBar = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding(),
-                contentAlignment = Alignment.BottomCenter
-            ) {
-                NavigationBar(
-                    containerColor = if (isLiquidTheme) Color.Transparent else MaterialTheme.colorScheme.surface,
-                    tonalElevation = if (isLiquidTheme) 0.dp else 8.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(
-                            if (isLiquidTheme) {
-                                Modifier
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(
-                                        if (isDark) Color(0x3D11111A) else Color(0x66FFFFFF)
-                                    )
-                                    .border(
-                                        1.dp,
-                                        Brush.verticalGradient(
-                                            listOf(
-                                                Color.White.copy(alpha = 0.22f),
-                                                Color.White.copy(alpha = 0.05f)
+    val backgroundBrush = if (isLiquidTheme) {
+        Brush.radialGradient(
+            colorStops = arrayOf(
+                0.00f to Color(0xFFB39DDB),  // soft purple top-left
+                0.25f to Color(0xFF90CAF9),  // soft blue
+                0.50f to Color(0xFFF48FB1),  // soft pink
+                0.75f to Color(0xFF80CBC4),  // soft teal
+                1.00f to Color(0xFFE8DEF8)   // light lavender base
+            ),
+            center = Offset(0f, 0f),
+            radius = 2200f
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                MaterialTheme.colorScheme.background,
+                MaterialTheme.colorScheme.background
+            )
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundBrush)
+    ) {
+        Scaffold(
+            modifier = modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            bottomBar = {
+                if (isLiquidTheme) {
+                    // Slimmed-down, perfect floating glass pill shape (sits lower)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding(),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        val glassBgColor = if (isDark) Color.Black.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.65f)
+                        val glassBorderColorTop = if (isDark) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.55f)
+                        val glassBorderColorBot = if (isDark) Color.White.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.15f)
+                        val isSelectedBgColor = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+
+                        Row(
+                            modifier = Modifier
+                                .padding(bottom = 4.dp, start = 18.dp, end = 18.dp)
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(glassBgColor)
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            glassBorderColorTop, // top specular
+                                            glassBorderColorBot  // bottom depth
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(20.dp)
+                                )
+                                .padding(horizontal = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceAround,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AppTab.values().forEach { tab ->
+                                val isSelected = currentTab == tab
+                                val tabNameStr = Translator.translate(tab.name.lowercase(), appLanguage)
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { currentTab = tab }
+                                        .then(
+                                            if (isSelected) {
+                                                Modifier.background(isSelectedBgColor)
+                                            } else Modifier
+                                        )
+                                        .padding(vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = tab.icon,
+                                            contentDescription = tabNameStr,
+                                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isSelected) 1.0f else 0.45f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(1.dp))
+                                        Text(
+                                            text = tabNameStr,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isSelected) 1.0f else 0.45f),
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                            fontSize = 9.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                        ) {
+                            NavigationBar(
+                                containerColor = Color.Transparent,
+                                tonalElevation = 0.dp,
+                                modifier = Modifier.fillMaxWidth().height(56.dp),
+                                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
+                            ) {
+                                AppTab.values().forEach { tab ->
+                                    val tabNameStr = Translator.translate(tab.name.lowercase(), appLanguage)
+                                    if (tab == AppTab.SECTIONS) {
+                                        NavigationBarItem(
+                                            selected = false,
+                                            onClick = { currentTab = AppTab.SECTIONS },
+                                            alwaysShowLabel = false,
+                                            icon = { 
+                                                Box(modifier = Modifier.size(20.dp))
+                                            },
+                                            label = null,
+                                            colors = NavigationBarItemDefaults.colors(
+                                                indicatorColor = Color.Transparent
                                             )
-                                        ),
-                                        RoundedCornerShape(20.dp)
-                                    )
-                            } else Modifier
-                        )
-                ) {
-                    AppTab.values().forEach { tab ->
-                        val tabNameStr = Translator.translate(tab.name.lowercase(), appLanguage)
-                        if (tab == AppTab.SECTIONS) {
-                            NavigationBarItem(
-                                selected = false,
-                                onClick = { currentTab = AppTab.SECTIONS },
-                                alwaysShowLabel = false,
-                                icon = { 
-                                    Box(modifier = Modifier.size(24.dp))
-                                },
-                                label = null,
-                                colors = NavigationBarItemDefaults.colors(
-                                    indicatorColor = Color.Transparent
-                                )
-                            )
-                        } else {
-                            NavigationBarItem(
-                                selected = currentTab == tab,
-                                onClick = { currentTab = tab },
-                                alwaysShowLabel = false,
-                                icon = { 
-                                    Icon(
-                                        tab.icon, 
-                                        contentDescription = tabNameStr,
-                                        modifier = Modifier.size(24.dp)
-                                    ) 
-                                },
-                                label = {
-                                    Text(
-                                        text = tabNameStr,
-                                        fontWeight = if (currentTab == tab) FontWeight.Black else FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
+                                        )
+                                    } else {
+                                        NavigationBarItem(
+                                            selected = currentTab == tab,
+                                            onClick = { currentTab = tab },
+                                            alwaysShowLabel = false,
+                                            icon = { 
+                                                Icon(
+                                                    tab.icon, 
+                                                    contentDescription = tabNameStr,
+                                                    modifier = Modifier.size(20.dp)
+                                                ) 
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = tabNameStr,
+                                                    fontWeight = if (currentTab == tab) FontWeight.Black else FontWeight.Bold,
+                                                    fontSize = 9.5.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                                indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                                unselectedIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                                unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        FloatingActionButton(
+                            onClick = { currentTab = AppTab.SECTIONS },
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = Color.White,
+                            shape = CircleShape,
+                            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp),
+                            modifier = Modifier
+                                .navigationBarsPadding()
+                                .padding(bottom = 12.dp)
+                                .size(48.dp)
+                                .testTag("sections_floating_tab_btn")
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "الاقسام",
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
                 }
-
-                FloatingActionButton(
-                    onClick = { currentTab = AppTab.SECTIONS },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = Color.White,
-                    shape = CircleShape,
-                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp),
-                    modifier = Modifier
-                        .padding(bottom = 28.dp)
-                        .size(56.dp)
-                        .testTag("sections_floating_tab_btn")
-                ) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = "الاقسام",
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-        },
+            },
         floatingActionButton = {
             if (currentTab != AppTab.SETTINGS && currentTab != AppTab.HOME && currentTab != AppTab.TRANSACTIONS && currentTab != AppTab.SECTIONS) {
                 if (currentTab == AppTab.DEBTS) {
@@ -452,7 +572,7 @@ fun WorkshopApp(
                         onNavigateToSections = { currentTab = AppTab.SECTIONS },
                         onNavigateToTransactions = { currentTab = AppTab.TRANSACTIONS },
                         onTransactionClicked = { 
-                            if (it.category != "DEBT") transactionToEdit = it 
+                            if (it.category != "DEBT") editingTransactionId = it.id 
                             else Toast.makeText(context, "يتم تعديل الديون من قسم الديون", Toast.LENGTH_SHORT).show()
                         }
                     )
@@ -465,7 +585,7 @@ fun WorkshopApp(
                             showAddDialog = true
                         },
                         onTransactionClicked = { 
-                            if (it.category != "DEBT") transactionToEdit = it 
+                            if (it.category != "DEBT") editingTransactionId = it.id 
                             else Toast.makeText(context, "يتم تعديل الديون من قسم الديون", Toast.LENGTH_SHORT).show()
                         }
                     )
@@ -490,7 +610,7 @@ fun WorkshopApp(
                             }
                         },
                         onTransactionClicked = { 
-                            if (it.category != "DEBT") transactionToEdit = it 
+                            if (it.category != "DEBT") editingTransactionId = it.id 
                             else Toast.makeText(context, "يتم تعديل الديون من قسم الديون", Toast.LENGTH_SHORT).show()
                         },
                         onToggleDelivery = { 
@@ -516,6 +636,7 @@ fun WorkshopApp(
             }
         }
     }
+}
 }
 
 // ======================== STATISTICS MAIN SCREEN WITH TABS ========================
@@ -753,7 +874,7 @@ fun DashboardScreen(
                                 Icon(Icons.Default.TrendingUp, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(14.dp))
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = "المجـموع المحصل", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), textAlign = TextAlign.Center)
+                            Text(text = "المجموع المحصل", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), textAlign = TextAlign.Center)
                             Text(
                                 text = formatCurrency(stats.totalRevenue),
                                 fontSize = 13.sp,
@@ -785,8 +906,15 @@ fun DashboardScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
+                    }
 
-                        // Expenses
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Workshop Debts
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.weight(1f)
@@ -795,15 +923,63 @@ fun DashboardScreen(
                                 modifier = Modifier
                                     .size(24.dp)
                                     .clip(CircleShape)
-                                    .background(ExpenseRed.copy(alpha = 0.15f)),
+                                    .background(Color(0xFFE53935).copy(alpha = 0.15f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Payments, contentDescription = null, tint = ExpenseRed, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Default.AssignmentLate, contentDescription = null, tint = Color(0xFFE53935), modifier = Modifier.size(14.dp))
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = "ديون ومصاريف", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), textAlign = TextAlign.Center)
+                            Text(text = "ديون الورشة", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), textAlign = TextAlign.Center)
                             Text(
-                                text = formatCurrency(stats.expensesCost),
+                                text = formatCurrency(stats.workshopDebts),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Personal Debts Owed to us
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF00796B).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = Color(0xFF00796B), modifier = Modifier.size(14.dp))
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(text = "ديون لنا (شخصية)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), textAlign = TextAlign.Center)
+                            Text(
+                                text = formatCurrency(stats.personalDebtsOwedToMe),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Personal Debts Owed by us
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF8D6E63).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFF8D6E63), modifier = Modifier.size(14.dp))
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(text = "ديون علينا (شخصية)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), textAlign = TextAlign.Center)
+                            Text(
+                                text = formatCurrency(stats.personalDebtsOwedByMe),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -820,6 +996,9 @@ fun DashboardScreen(
                         partsCost = stats.partsCost,
                         expenses = stats.expensesCost,
                         profit = stats.totalProfit,
+                        workshopDebts = stats.workshopDebts,
+                        personalDebtsOwedToMe = stats.personalDebtsOwedToMe,
+                        personalDebtsOwedByMe = stats.personalDebtsOwedByMe,
                         modifier = Modifier.padding(top = 16.dp)
                     )
                 }
@@ -1049,7 +1228,7 @@ fun DashboardScreen(
         } else {
             // Display first 5 latest transactions on dashboard
             val displayedList = transactionsList.take(5)
-            items(displayedList) { transaction ->
+            items(displayedList, key = { it.id }) { transaction ->
                 TransactionListItem(
                     transaction = transaction,
                     onClick = { onCardClicked(transaction) },
@@ -1069,17 +1248,38 @@ fun SimpleFinancialBarChart(
     partsCost: Double,
     expenses: Double,
     profit: Double,
+    workshopDebts: Double = 0.0,
+    personalDebtsOwedToMe: Double = 0.0,
+    personalDebtsOwedByMe: Double = 0.0,
     modifier: Modifier = Modifier
 ) {
-    val totalCosts = partsCost + expenses
-    val maxVal = maxOf(revenue, totalCosts, profit).coerceAtLeast(1.0)
+    val maxVal = maxOf(
+        revenue, 
+        partsCost, 
+        expenses, 
+        profit, 
+        workshopDebts, 
+        personalDebtsOwedToMe, 
+        personalDebtsOwedByMe
+    ).coerceAtLeast(1.0)
     
-    val items = listOf(
-        Triple("المداخيل", revenue, ProfitGreen),
-        Triple("قطع الغيار", partsCost, GeneralBlue),
-        Triple("المصاريف", expenses, ExpenseRed),
-        Triple("صافي الربح", profit, MaterialTheme.colorScheme.primary)
-    )
+    val items = mutableListOf<Triple<String, Double, Color>>()
+    items.add(Triple("المداخيل", revenue, ProfitGreen))
+    items.add(Triple("قطع الغيار", partsCost, GeneralBlue))
+    
+    if (workshopDebts > 0.0) {
+        items.add(Triple("ديون الورشة", workshopDebts, Color(0xFFE53935)))
+    }
+    if (personalDebtsOwedToMe > 0.0) {
+        items.add(Triple("ديون شخصية لنا", personalDebtsOwedToMe, Color(0xFF00796B)))
+    }
+    if (personalDebtsOwedByMe > 0.0) {
+        items.add(Triple("ديون شخصية علينا", personalDebtsOwedByMe, Color(0xFF8D6E63)))
+    }
+    if (expenses > 0.0) {
+        items.add(Triple("المصاريف العامّة", expenses, ExpenseRed))
+    }
+    items.add(Triple("صافي الربح", profit, MaterialTheme.colorScheme.primary))
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -1150,34 +1350,61 @@ fun TransactionsListScreen(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
-        // Search Bar
+        // Beautiful and Spacious Search Bar
         TextField(
             value = searchQuery,
             onValueChange = onSearchQueryChanged,
-            placeholder = { Text("بحث عن قطعة، هاتف أو زبون...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث") },
+            placeholder = { 
+                Text(
+                    text = "بحث عن قطعة، هاتف أو زبون...", 
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                ) 
+            },
+            leadingIcon = { 
+                Icon(
+                    imageVector = Icons.Default.Search, 
+                    contentDescription = "بحث", 
+                    modifier = Modifier.size(22.dp)
+                ) 
+            },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { onSearchQueryChanged("") }) {
-                        Icon(Icons.Default.Close, contentDescription = "جلاء")
+                    IconButton(
+                        onClick = { onSearchQueryChanged("") },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close, 
+                            contentDescription = "جلاء", 
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             },
+            singleLine = true,
+            maxLines = 1,
+            textStyle = androidx.compose.ui.text.TextStyle(
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            ),
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .height(54.dp) // Explicit elegant height to prevent vertical squash
+                .clip(RoundedCornerShape(14.dp))
                 .testTag("search_field"),
             colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent
             )
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Categories Row
         val categories = listOf(
@@ -1194,44 +1421,52 @@ fun TransactionsListScreen(
 
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            items(categories) { cat ->
+            items(categories, key = { it.id }) { cat ->
                 val isSelected = (selectedCategory ?: "ALL") == cat.id
-                FilterChip(
-                    selected = isSelected,
-                    onClick = { onCategorySelected(cat.id) },
-                    label = { Text(cat.nameAr, fontSize = 12.sp) },
-                    leadingIcon = {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) cat.color else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
+                        .clickable { onCategorySelected(cat.id) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Icon(
                             imageVector = cat.icon,
                             contentDescription = cat.nameAr,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(13.dp),
                             tint = if (isSelected) Color.White else cat.color
                         )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = cat.color,
-                        selectedLabelColor = Color.White,
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
-                )
+                        Text(
+                            text = cat.nameAr,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Delivery Status Filter Row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp),
+                .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
-                text = "حالة التسليم:",
-                fontSize = 12.sp,
+                text = "التسليم:",
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
             )
@@ -1244,26 +1479,25 @@ fun TransactionsListScreen(
                     com.example.ui.viewmodel.DeliveryFilter.NOT_DELIVERED -> AccessoryOrange
                 }
                 
-                FilterChip(
-                    selected = isSelected,
-                    onClick = { onDeliveryFilterChanged(filterVal) },
-                    label = { 
-                        Text(
-                            text = filterVal.displayNameAr, 
-                            fontSize = 11.sp, 
-                            fontWeight = FontWeight.Bold
-                        ) 
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = chipColor,
-                        selectedLabelColor = Color.White,
-                        containerColor = MaterialTheme.colorScheme.surface
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) chipColor else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
+                        .clickable { onDeliveryFilterChanged(filterVal) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = filterVal.displayNameAr, 
+                        fontSize = 11.sp, 
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
                     )
-                )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Live count
         Row(
@@ -1318,7 +1552,7 @@ fun TransactionsListScreen(
                     }
                 }
             } else {
-                items(filteredTransactions) { transaction ->
+                items(filteredTransactions, key = { it.id }) { transaction ->
                     TransactionListItem(
                         transaction = transaction,
                         onClick = { onTransactionClicked(transaction) },
@@ -1356,22 +1590,24 @@ fun AddEditTransactionDialog(
         dueDate: Long?,
         transactionDate: Long,
         isDelivered: Boolean,
-        affectBalance: Boolean
+        affectBalance: Boolean,
+        isPrepaid: Boolean
     ) -> Unit
 ) {
-    var title by remember { mutableStateOf(transaction?.title ?: "") }
-    var selectedCategory by remember { mutableStateOf(transaction?.category ?: initialCategory ?: "SCREEN") }
-    var costPriceStr by remember { mutableStateOf(transaction?.costPrice?.let { if (it == 0.0) "" else if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "") }
-    var sellingPriceStr by remember { mutableStateOf(transaction?.sellingPrice?.let { if (it == 0.0) "" else if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "") }
-    var deviceModel by remember { mutableStateOf(transaction?.deviceModel ?: "") }
-    var customerName by remember { mutableStateOf(transaction?.customerName ?: "") }
-    var notes by remember { mutableStateOf(transaction?.notes ?: "") }
-    var isDelivered by remember { mutableStateOf(transaction?.isDelivered ?: true) }
-    var affectBalance by remember { mutableStateOf(transaction?.affectBalance ?: true) }
-    var creditPaidStr by remember { mutableStateOf(transaction?.creditPaid?.let { if (it == 0.0) "" else if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "") }
+    var title by rememberSaveable { mutableStateOf(transaction?.title ?: "") }
+    var selectedCategory by rememberSaveable { mutableStateOf(transaction?.category ?: initialCategory ?: "SCREEN") }
+    var costPriceStr by rememberSaveable { mutableStateOf(transaction?.costPrice?.let { if (it == 0.0) "" else if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "") }
+    var sellingPriceStr by rememberSaveable { mutableStateOf(transaction?.sellingPrice?.let { if (it == 0.0) "" else if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "") }
+    var deviceModel by rememberSaveable { mutableStateOf(transaction?.deviceModel ?: "") }
+    var customerName by rememberSaveable { mutableStateOf(transaction?.customerName ?: "") }
+    var notes by rememberSaveable { mutableStateOf(transaction?.notes ?: "") }
+    var isDelivered by rememberSaveable { mutableStateOf(transaction?.isDelivered ?: true) }
+    var isPrepaid by rememberSaveable { mutableStateOf(transaction?.isPrepaid ?: false) }
+    var affectBalance by rememberSaveable { mutableStateOf(transaction?.affectBalance ?: true) }
+    var creditPaidStr by rememberSaveable { mutableStateOf(transaction?.creditPaid?.let { if (it == 0.0) "" else if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "") }
     
     // Auto-update isDelivered based on selectedCategory for new items
-    var hasManuallyChosenedStatus by remember { mutableStateOf(false) }
+    var hasManuallyChosenedStatus by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(selectedCategory) {
         if (transaction == null && !hasManuallyChosenedStatus) {
             if (selectedCategory == "INVENTORY" || selectedCategory == "REFURB") {
@@ -1386,7 +1622,7 @@ fun AddEditTransactionDialog(
     val goodsName by viewModel.walletGoodsName.collectAsStateWithLifecycle()
     val personalName by viewModel.walletPersonalName.collectAsStateWithLifecycle()
 
-    var isCreditSale by remember(transaction) {
+    var isCreditSale by rememberSaveable {
         mutableStateOf(transaction?.let { it.creditAmount > 0.0 } ?: false)
     }
 
@@ -1396,9 +1632,9 @@ fun AddEditTransactionDialog(
             if (dp <= 0.0) "" else if (dp % 1.0 == 0.0) dp.toLong().toString() else dp.toString()
         } ?: ""
     }
-    var downPaymentStr by remember(initialDownPayment) { mutableStateOf(initialDownPayment) }
+    var downPaymentStr by rememberSaveable { mutableStateOf(initialDownPayment) }
 
-    var dueDate by remember { mutableStateOf(transaction?.dueDate) }
+    var dueDate by rememberSaveable { mutableStateOf(transaction?.dueDate) }
     var formattedDueDate by remember(dueDate) { 
         mutableStateOf(
             dueDate?.let {
@@ -1410,14 +1646,14 @@ fun AddEditTransactionDialog(
     }
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    var transactionDate by remember { mutableStateOf(transaction?.date ?: System.currentTimeMillis()) }
+    var transactionDate by rememberSaveable { mutableStateOf(transaction?.date ?: System.currentTimeMillis()) }
     var formattedTransactionDate by remember(transactionDate) { 
         mutableStateOf(
             java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(transactionDate))
         )
     }
 
-    var selectedWallet by remember(transaction, personalName, pocketName, goodsName) { 
+    var selectedWallet by rememberSaveable { 
         mutableStateOf(
             transaction?.wallet ?: if (initialCategory == "EXPENSE") personalName else if (initialCategory == "ACCESSORY") goodsName else pocketName
         ) 
@@ -1438,8 +1674,8 @@ fun AddEditTransactionDialog(
         Triple("حلاقة", "✂️", Color(0xFF009688)),
         Triple("أخرى", "📦", Color(0xFF607D8B))
     )
-    var selectedPresetName by remember { mutableStateOf<String?>(null) }
-    var validationError by remember { mutableStateOf<String?>(null) }
+    var selectedPresetName by rememberSaveable { mutableStateOf<String?>(null) }
+    var validationError by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Live balance calculation for each wallet in dialog
     val pocketInit by viewModel.walletPocketInit.collectAsStateWithLifecycle()
@@ -1453,27 +1689,33 @@ fun AddEditTransactionDialog(
         (it.wallet == pocketName || it.wallet == "مصروف الشهر" || it.wallet == "الصندوق (Pocket)" || it.wallet == "محفظة المحل" || it.wallet.isBlank()) 
         && it.category != "ACCESSORY" 
         && it.affectBalance 
-    }.sumOf { it.profit }
+    }.sumOf { 
+        it.cashFlow
+    }
     val pocketBalance = pocketInit + pocketChange
 
     val bankChange = transactionsList.filter { 
         (it.wallet == bankName || it.wallet == "حساب بنكي") 
         && it.category != "ACCESSORY" 
         && it.affectBalance 
-    }.sumOf { it.profit }
+    }.sumOf { 
+        it.cashFlow
+    }
     val bankBalance = bankInit + bankChange
 
     val goodsChange = transactionsList.filter { 
         it.category == "ACCESSORY" 
         && it.affectBalance 
-    }.sumOf { it.profit }
+    }.sumOf { it.cashFlow }
     val goodsBalance = goodsInit + goodsChange
 
     val personalChange = transactionsList.filter { 
         (it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي") 
         && it.category != "ACCESSORY" 
         && it.affectBalance 
-    }.sumOf { it.profit }
+    }.sumOf { 
+        it.cashFlow
+    }
     val personalBalance = personalInit + personalChange
 
     val selectedBalance = when {
@@ -1562,7 +1804,8 @@ fun AddEditTransactionDialog(
                 dueDate,
                 transactionDate,
                 isDelivered,
-                affectBalance
+                affectBalance,
+                isPrepaid
             )
         }
     }
@@ -2451,6 +2694,65 @@ fun AddEditTransactionDialog(
                                             )
                                         )
                                     }
+                                    
+                                    if (selectedCategory == "SCREEN" || selectedCategory == "PARTS" || selectedCategory == "SERVICE" || selectedCategory == "OTHER") {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { isPrepaid = !isPrepaid }
+                                                .background(
+                                                    if (isPrepaid) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                                                    else Color.Transparent
+                                                )
+                                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (isPrepaid) ProfitGreen.copy(alpha = 0.15f)
+                                                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Payments,
+                                                        contentDescription = null,
+                                                        tint = if (isPrepaid) ProfitGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                                Column {
+                                                    Text(
+                                                        text = "استلام المبلغ كاملاً مسبقاً (مدفوع مقدمًا) 💰",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 13.sp,
+                                                        color = if (isPrepaid) ProfitGreen else MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    Text(
+                                                        text = if (isPrepaid) "تم تسجيل استلام الكاش مسبقاً وسيدخل في حساب الأرباح" else "قم بتفعيلها إذا سدد الزبون التكلفة بالكامل مقدمًا قبل الإصلاح",
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                                    )
+                                                }
+                                            }
+                                            Switch(
+                                                checked = isPrepaid,
+                                                onCheckedChange = { isPrepaid = it }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             Spacer(modifier = Modifier.height(8.dp))
@@ -2634,12 +2936,18 @@ fun DebtsScreen(
     onAddDebtRequested: () -> Unit
 ) {
     val installments by viewModel.installmentsFlow.collectAsStateWithLifecycle()
-    var selectedTransactionToCollect by remember { mutableStateOf<WorkshopTransaction?>(null) }
-    var selectedPersonalDebtForInstallments by remember { mutableStateOf<PersonalDebt?>(null) }
-    var showPersonalDebtsPaidFilter by remember { mutableStateOf(true) } // toggle to view paid personal debts
-    var showWorkshopDebtsExplanation by remember { mutableStateOf(false) }
-    var selectedListTab by remember { mutableStateOf(0) } // 0: Customer Credits Log, 1: Debtors Directory, 2: Personal Debts Log
-    var debtorSearchQuery by remember { mutableStateOf("") }
+    var selectedTransactionToCollectId by rememberSaveable { mutableStateOf<Int?>(null) }
+    val selectedTransactionToCollect = remember(selectedTransactionToCollectId, transactions) {
+        selectedTransactionToCollectId?.let { id -> transactions.find { it.id == id } }
+    }
+    var selectedPersonalDebtIdForInstallments by rememberSaveable { mutableStateOf<Int?>(null) }
+    val selectedPersonalDebtForInstallments = remember(selectedPersonalDebtIdForInstallments, personalDebts) {
+        selectedPersonalDebtIdForInstallments?.let { id -> personalDebts.find { it.id == id } }
+    }
+    var showPersonalDebtsPaidFilter by rememberSaveable { mutableStateOf(true) } // toggle to view paid personal debts
+    var showWorkshopDebtsExplanation by rememberSaveable { mutableStateOf(false) }
+    var selectedListTab by rememberSaveable { mutableStateOf(0) } // 0: Customer Credits Log, 1: Debtors Directory, 2: Personal Debts Log
+    var debtorSearchQuery by rememberSaveable { mutableStateOf("") }
     val expandedDebtors = remember { mutableStateMapOf<String, Boolean>() }
     
     // Customer Credits Stats
@@ -2677,22 +2985,22 @@ fun DebtsScreen(
     // Dialog: Collect Customer Credit Payment
     if (selectedTransactionToCollect != null) {
         CollectCustomerCreditDialog(
-            transaction = selectedTransactionToCollect!!,
+            transaction = selectedTransactionToCollect,
             installments = installments,
-            onDismiss = { selectedTransactionToCollect = null },
+            onDismiss = { selectedTransactionToCollectId = null },
             onSave = { addPayment, paymentNote ->
-                val newPaid = selectedTransactionToCollect!!.creditPaid + addPayment
+                val newPaid = selectedTransactionToCollect.creditPaid + addPayment
                 // Update transaction in-place to preserve original ID
-                viewModel.updateTransaction(selectedTransactionToCollect!!.copy(creditPaid = newPaid))
+                viewModel.updateTransaction(selectedTransactionToCollect.copy(creditPaid = newPaid))
                 
                 // Add installment payment record
                 viewModel.addInstallment(
-                    refId = selectedTransactionToCollect!!.id,
+                    refId = selectedTransactionToCollect.id,
                     refType = "TRANSACTION",
                     amountPaid = addPayment,
                     notes = paymentNote.ifBlank { "تسديد جزء من الكريدي" }
                 )
-                selectedTransactionToCollect = null
+                selectedTransactionToCollectId = null
                 Toast.makeText(context, "تم تسجيل الدفعة وتحديث الكريدي!", Toast.LENGTH_SHORT).show()
             }
         )
@@ -2701,33 +3009,33 @@ fun DebtsScreen(
     // Dialog: Manage Personal Debt Installments
     if (selectedPersonalDebtForInstallments != null) {
         PersonalDebtInstallmentsDialog(
-            debt = selectedPersonalDebtForInstallments!!,
+            debt = selectedPersonalDebtForInstallments,
             installments = installments,
-            onDismiss = { selectedPersonalDebtForInstallments = null },
+            onDismiss = { selectedPersonalDebtIdForInstallments = null },
             onTogglePaid = {
-                viewModel.togglePersonalDebtPaid(selectedPersonalDebtForInstallments!!)
-                selectedPersonalDebtForInstallments = null
+                viewModel.togglePersonalDebtPaid(selectedPersonalDebtForInstallments)
+                selectedPersonalDebtIdForInstallments = null
             },
             onSaveNewPayment = { amountPaid, paymentNote ->
                 // Add installment record
                 viewModel.addInstallment(
-                    refId = selectedPersonalDebtForInstallments!!.id,
+                    refId = selectedPersonalDebtForInstallments.id,
                     refType = "PERSONAL_DEBT",
                     amountPaid = amountPaid,
                     notes = paymentNote.ifBlank { "تسديد جزء من الدين" }
                 )
                 
                 // Auto-set paid true if total reaches/exceeds original debt amount
-                val debtId = selectedPersonalDebtForInstallments!!.id
+                val debtId = selectedPersonalDebtForInstallments.id
                 val existingPaid = installments.filter { it.refId == debtId && it.refType == "PERSONAL_DEBT" }.sumOf { it.amountPaid }
                 val totalPaidNow = existingPaid + amountPaid
-                if (totalPaidNow >= selectedPersonalDebtForInstallments!!.amount) {
-                    viewModel.updateDebt(selectedPersonalDebtForInstallments!!.copy(isPaid = true))
+                if (totalPaidNow >= selectedPersonalDebtForInstallments.amount) {
+                    viewModel.updateDebt(selectedPersonalDebtForInstallments.copy(isPaid = true))
                     Toast.makeText(context, "تم تسجيل الدفعة وسداد كامل الدين تلقائياً! 🎉", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "تم تسجيل قسط الدين بنجاح! 💸", Toast.LENGTH_SHORT).show()
                 }
-                selectedPersonalDebtForInstallments = null
+                selectedPersonalDebtIdForInstallments = null
             }
         )
     }
@@ -3173,7 +3481,7 @@ fun DebtsScreen(
                     }
                 }
             } else {
-                items(sortedCredits) { tx ->
+                items(sortedCredits, key = { it.id }) { tx ->
                     val isPaid = tx.creditRemaining <= 0
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -3205,7 +3513,7 @@ fun DebtsScreen(
                                 }
                                 if (!isPaid) {
                                     Button(
-                                        onClick = { selectedTransactionToCollect = tx },
+                                        onClick = { selectedTransactionToCollectId = tx.id },
                                         shape = RoundedCornerShape(8.dp),
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen),
@@ -3338,7 +3646,7 @@ fun DebtsScreen(
                     }
                 }
             } else {
-                items(filteredDebtors) { debtor ->
+                items(filteredDebtors, key = { it.name }) { debtor ->
                     val isExpanded = expandedDebtors[debtor.name] ?: false
                     Card(
                         modifier = Modifier
@@ -3665,11 +3973,11 @@ fun DebtsScreen(
                     }
                 }
             } else {
-                items(displayedDebts) { debt ->
+                items(displayedDebts, key = { it.id }) { debt ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { selectedPersonalDebtForInstallments = debt },
+                            .clickable { selectedPersonalDebtIdForInstallments = debt.id },
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (debt.isPaid) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface
@@ -3812,16 +4120,16 @@ fun AddPersonalDebtDialog(
     onDismiss: () -> Unit,
     onSave: (name: String, amount: Double, isOwedToMe: Boolean, wallet: String, notes: String, dueDate: Long?) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var amountStr by remember { mutableStateOf("") }
-    var isOwedToMe by remember { mutableStateOf(false) } // Default: عليا يسالوني
-    var notes by remember { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
+    var amountStr by rememberSaveable { mutableStateOf("") }
+    var isOwedToMe by rememberSaveable { mutableStateOf(false) } // Default: عليا يسالوني
+    var notes by rememberSaveable { mutableStateOf("") }
     
     val walletOptions = listOf("محفظة المحل", "سلعة", "حساب بنكي", "مصروف شخصي")
-    var selectedWallet by remember { mutableStateOf(walletOptions[0]) }
+    var selectedWallet by rememberSaveable { mutableStateOf(walletOptions[0]) }
     var isWalletDropdownExpanded by remember { mutableStateOf(false) }
 
-    var dueDate by remember { mutableStateOf<Long?>(null) }
+    var dueDate by rememberSaveable { mutableStateOf<Long?>(null) }
     var formattedDueDate by remember(dueDate) { 
         mutableStateOf(
             dueDate?.let {
@@ -4017,8 +4325,8 @@ fun CollectCustomerCreditDialog(
     onDismiss: () -> Unit,
     onSave: (addPayment: Double, paymentNote: String) -> Unit
 ) {
-    var paymentStr by remember { mutableStateOf("") }
-    var paymentNoteStr by remember { mutableStateOf("") }
+    var paymentStr by rememberSaveable { mutableStateOf("") }
+    var paymentNoteStr by rememberSaveable { mutableStateOf("") }
     val currentPaid = transaction.creditPaid
     val outstanding = transaction.creditRemaining
 
@@ -4251,8 +4559,8 @@ fun PersonalDebtInstallmentsDialog(
     onSaveNewPayment: (amount: Double, note: String) -> Unit,
     onTogglePaid: () -> Unit
 ) {
-    var paymentStr by remember { mutableStateOf("") }
-    var paymentNoteStr by remember { mutableStateOf("") }
+    var paymentStr by rememberSaveable { mutableStateOf("") }
+    var paymentNoteStr by rememberSaveable { mutableStateOf("") }
 
     val debtInstallments = remember(installments, debt.id) {
         installments.filter { it.refId == debt.id && it.refType == "PERSONAL_DEBT" }
@@ -4512,7 +4820,7 @@ fun GoogleAssistantDialog(
     personalDebts: List<PersonalDebt>,
     onDismiss: () -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(0) } // 0: Financial Advice, 1: Smart Diagnosis
+    var selectedTab by rememberSaveable { mutableStateOf(0) } // 0: Financial Advice, 1: Smart Diagnosis
 
     // Key status helper
     val isKeyMissing = GeminiManager.isApiKeyMissing()
@@ -4710,8 +5018,8 @@ fun FinancialAdvisorTab(
     transactionsList: List<WorkshopTransaction>,
     personalDebts: List<PersonalDebt>
 ) {
-    var responseText by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
+    var responseText by rememberSaveable { mutableStateOf("") }
+    var isLoading by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // Calculated metrics inside
@@ -4898,10 +5206,10 @@ fun FinancialAdvisorTab(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmartDiagnosticsTab() {
-    var brandAndModel by remember { mutableStateOf("") }
-    var symptomText by remember { mutableStateOf("") }
-    var responseText by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
+    var brandAndModel by rememberSaveable { mutableStateOf("") }
+    var symptomText by rememberSaveable { mutableStateOf("") }
+    var responseText by rememberSaveable { mutableStateOf("") }
+    var isLoading by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val popularModels = listOf("iPhone 11", "Samsung S20", "Redmi Note 10", "Poco X3")
@@ -4931,7 +5239,7 @@ fun SmartDiagnosticsTab() {
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(popularModels) { model ->
+                    items(popularModels, key = { it }) { model ->
                         val isSel = brandAndModel == model
                         FilterChip(
                             selected = isSel,
@@ -4962,7 +5270,7 @@ fun SmartDiagnosticsTab() {
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(popularSymptoms) { symptom ->
+                    items(popularSymptoms, key = { it }) { symptom ->
                         val isSel = symptomText == symptom
                         FilterChip(
                             selected = isSel,
@@ -5647,7 +5955,7 @@ fun WalletTransactionsDialog(
     }
 
     val totalFlow = remember(walletTransactions) {
-        walletTransactions.sumOf { it.profit }
+        walletTransactions.sumOf { it.cashFlow }
     }
 
     Dialog(
@@ -5768,7 +6076,7 @@ fun WalletTransactionsDialog(
                             }
                         }
                     } else {
-                        items(displayedTransactions) { trx ->
+                        items(displayedTransactions, key = { it.id }) { trx ->
                             TransactionListItem(
                                 transaction = trx,
                                 onClick = {
@@ -5825,27 +6133,33 @@ fun WalletsSection(
         (it.wallet == pocketName || it.wallet == "مصروف الشهر" || it.wallet == "الصندوق (Pocket)" || it.wallet == "محفظة المحل" || it.wallet.isBlank()) 
         && it.category != "ACCESSORY" 
         && it.affectBalance 
-    }.sumOf { it.profit }
+    }.sumOf { 
+        it.cashFlow
+    }
     val pocketBalance = pocketInit + pocketChange
 
     val bankChange = transactionsList.filter { 
         (it.wallet == bankName || it.wallet == "حساب بنكي") 
         && it.category != "ACCESSORY" 
         && it.affectBalance 
-    }.sumOf { it.profit }
+    }.sumOf { 
+        it.cashFlow
+    }
     val bankBalance = bankInit + bankChange
 
     val goodsChange = transactionsList.filter { 
         it.category == "ACCESSORY" 
         && it.affectBalance 
-    }.sumOf { it.profit }
+    }.sumOf { it.cashFlow }
     val goodsBalance = goodsInit + goodsChange
 
     val personalChange = transactionsList.filter { 
         (it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي") 
         && it.category != "ACCESSORY" 
         && it.affectBalance 
-    }.sumOf { it.profit }
+    }.sumOf { 
+        it.cashFlow
+    }
     val personalBalance = personalInit + personalChange
 
     val totalBalance = (if (pocketInclude) pocketBalance else 0.0) +
@@ -6288,20 +6602,21 @@ fun PersonalExpenseManagerDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var title by remember { mutableStateOf("") }
-    var amountStr by remember { mutableStateOf("") }
-    var details by remember { mutableStateOf("") }
-    var selectedPreset by remember { mutableStateOf<String?>(null) }
-    var showEditBaseDialog by remember { mutableStateOf(false) }
+    var title by rememberSaveable { mutableStateOf("") }
+    var amountStr by rememberSaveable { mutableStateOf("") }
+    var details by rememberSaveable { mutableStateOf("") }
+    var selectedPreset by rememberSaveable { mutableStateOf<String?>(null) }
+    var showEditBaseDialog by rememberSaveable { mutableStateOf(false) }
 
+    val personalName by viewModel.walletPersonalName.collectAsStateWithLifecycle()
     val transactionsList by viewModel.transactionsFlow.collectAsStateWithLifecycle()
     val personalTransactions = transactionsList.filter { 
-        it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي" 
+        it.wallet == personalName || it.wallet == "مصروف شخصي" || it.wallet == "مصروفي شخصي" || it.wallet == "مصروفي الشخصي" 
     }.sortedByDescending { it.date }
 
     if (showEditBaseDialog) {
         EditWalletInitialBalanceDialog(
-            walletName = "مصروف شخصي",
+            walletName = personalName.ifEmpty { "مصروف شخصي" },
             currentInitial = personalInit,
             onDismiss = { showEditBaseDialog = false },
             onSave = { newValue ->
@@ -6641,7 +6956,7 @@ fun PersonalExpenseManagerDialog(
                                         notes = details,
                                         creditAmount = 0.0,
                                         creditPaid = 0.0,
-                                        wallet = "مصروف شخصي"
+                                        wallet = personalName.ifEmpty { "مصروف شخصي" }
                                     )
 
                                     title = ""
@@ -6746,7 +7061,7 @@ fun PersonalExpenseManagerDialog(
                             }
                         }
                     } else {
-                        items(personalTransactions) { trx ->
+                        items(personalTransactions, key = { it.id }) { trx ->
                             // Visual Icon Circle based on Transaction title matches
                             val iconColor = remember(trx.title) {
                                 when {
@@ -6862,158 +7177,4 @@ fun PersonalExpenseManagerDialog(
     }
 }
 
-@Composable
-fun LiquidGlassBlobBackground(modifier: Modifier = Modifier, isDark: Boolean = true) {
-    val animX1 = remember { Animatable(0.2f) }
-    val animY1 = remember { Animatable(0.1f) }
-    val animX2 = remember { Animatable(0.8f) }
-    val animY2 = remember { Animatable(0.8f) }
-    val animX3 = remember { Animatable(0.5f) }
-    val animY3 = remember { Animatable(0.4f) }
 
-    val pulse1 = remember { Animatable(0.75f) }
-    val pulse2 = remember { Animatable(0.70f) }
-    val pulse3 = remember { Animatable(0.65f) }
-
-    LaunchedEffect(Unit) {
-        launch {
-            while (true) {
-                animX1.animateTo(0.8f, animationSpec = tween(18000, easing = FastOutSlowInEasing))
-                animX1.animateTo(0.2f, animationSpec = tween(18000, easing = FastOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                animY1.animateTo(0.7f, animationSpec = tween(22000, easing = FastOutSlowInEasing))
-                animY1.animateTo(0.1f, animationSpec = tween(22000, easing = FastOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                animX2.animateTo(0.1f, animationSpec = tween(25000, easing = FastOutSlowInEasing))
-                animX2.animateTo(0.8f, animationSpec = tween(25000, easing = FastOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                animY2.animateTo(0.2f, animationSpec = tween(20000, easing = FastOutSlowInEasing))
-                animY2.animateTo(0.8f, animationSpec = tween(20000, easing = FastOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                animX3.animateTo(0.9f, animationSpec = tween(28000, easing = FastOutSlowInEasing))
-                animX3.animateTo(0.3f, animationSpec = tween(28000, easing = FastOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                animY3.animateTo(0.1f, animationSpec = tween(24000, easing = FastOutSlowInEasing))
-                animY3.animateTo(0.9f, animationSpec = tween(24000, easing = FastOutSlowInEasing))
-            }
-        }
-        // Organic biological fluid pulse animations
-        launch {
-            while (true) {
-                pulse1.animateTo(0.95f, animationSpec = tween(12000, easing = LinearOutSlowInEasing))
-                pulse1.animateTo(0.75f, animationSpec = tween(12000, easing = LinearOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                pulse2.animateTo(0.88f, animationSpec = tween(14000, easing = LinearOutSlowInEasing))
-                pulse2.animateTo(0.68f, animationSpec = tween(14000, easing = LinearOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                pulse3.animateTo(0.82f, animationSpec = tween(16000, easing = LinearOutSlowInEasing))
-                pulse3.animateTo(0.58f, animationSpec = tween(16000, easing = LinearOutSlowInEasing))
-            }
-        }
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.radialGradient(
-                    colors = if (isDark) {
-                        listOf(Color(0xFF141727), Color(0xFF060811))
-                    } else {
-                        listOf(Color(0xFFEFF5FB), Color(0xFFD3E2F2))
-                    },
-                    radius = 2200f
-                )
-            )
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
-
-            if (isDark) {
-                // Blob 1: Electric Sky Blue
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF007AFF).copy(alpha = 0.28f), Color.Transparent),
-                        center = Offset(width * animX1.value, height * animY1.value),
-                        radius = width * pulse1.value
-                    ),
-                    center = Offset(width * animX1.value, height * animY1.value),
-                    radius = width * pulse1.value
-                )
-                // Blob 2: Vibrant Violet
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFD355F5).copy(alpha = 0.25f), Color.Transparent),
-                        center = Offset(width * animX2.value, height * animY2.value),
-                        radius = width * pulse2.value
-                    ),
-                    center = Offset(width * animX2.value, height * animY2.value),
-                    radius = width * pulse2.value
-                )
-                // Blob 3: Premium Crimson Rose
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFFF2D55).copy(alpha = 0.20f), Color.Transparent),
-                        center = Offset(width * animX3.value, height * animY3.value),
-                        radius = width * pulse3.value
-                    ),
-                    center = Offset(width * animX3.value, height * animY3.value),
-                    radius = width * pulse3.value
-                )
-            } else {
-                // Blob 1: Vibrant Aqua Blue
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF007AFF).copy(alpha = 0.16f), Color.Transparent),
-                        center = Offset(width * animX1.value, height * animY1.value),
-                        radius = width * pulse1.value
-                    ),
-                    center = Offset(width * animX1.value, height * animY1.value),
-                    radius = width * pulse1.value
-                )
-                // Blob 2: Soft Purple Pearl
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFD355F5).copy(alpha = 0.14f), Color.Transparent),
-                        center = Offset(width * animX2.value, height * animY2.value),
-                        radius = width * pulse2.value
-                    ),
-                    center = Offset(width * animX2.value, height * animY2.value),
-                    radius = width * pulse2.value
-                )
-                // Blob 3: Warm Liquid Coral Pink
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFFF9500).copy(alpha = 0.12f), Color.Transparent),
-                        center = Offset(width * animX3.value, height * animY3.value),
-                        radius = width * pulse3.value
-                    ),
-                    center = Offset(width * animX3.value, height * animY3.value),
-                    radius = width * pulse3.value
-                )
-            }
-        }
-    }
-}
